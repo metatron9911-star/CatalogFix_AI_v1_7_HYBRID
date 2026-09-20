@@ -1266,6 +1266,38 @@ _FALSE_CODE_PREFIXES = {
     "RAL", "NCS", "EUR", "USD", "VAT", "CM", "MM", "KG", "PCS", "PDF", "PAGE",
     "WWW", "HTTP", "RGB", "PANTONE", "ISO", "DIN"
 }
+MATRIX_SECTION_KEYWORDS = (
+    "veneer", "colour", "color", "cpl", "hpl", "cardboard",
+    "laminate", "foil", "paint", "glass", "metal", "decor",
+    "surface", "finish",
+)
+
+_TECH_DOC_HINTS = (
+    "absolute maximum ratings", "electrical characteristics", "typical characteristics",
+    "pin configuration", "pin functions", "package option addendum", "package materials information",
+    "package outline", "example board layout", "example stencil design", "revision history",
+    "thermal information", "recommended operating conditions", "application information",
+    "mechanical, packaging, and orderable information",
+    "datasheet", "data sheet", "technical data", "operating manual", "installation guide",
+    "wiring diagram", "schematic", "compliance", "material safety", "test report", "engineering",
+    "绝对最大额定值", "电气特性", "典型特性", "引脚配置", "引脚功能", "封装热阻",
+    "修订历史记录", "机械、封装和可订购信息", "封装和可订购信息",
+)
+
+_COMMERCIAL_PRICE_HINTS = (
+    "price list", "pricelist", "unit price", "retail price", "list price",
+    "wholesale price", "catalogue price", "recommended catalogue price", "sale price",
+    "order form", "quotation", "quote", "mrp", "price/pcs", "surcharge",
+    "kit price", "assembled price", "base price", "price/uom",
+    "розничная цена", "оптовая цена",
+)
+
+_STATISTICAL_REPORT_HINTS = (
+    "statistical", "average price", "median price", "percentile",
+    "price and purity", "price index", "market report",
+    "street purity", "wholesale purity", "drug group", "drug type", "purity type",
+)
+
 _GENERIC_VISUAL_HEADINGS = {
     "contents", "collection", "professional beauty", "tools", "beauty", "product",
     "products", "new", "style", "styles", "grand award", "personal care"
@@ -1778,7 +1810,7 @@ def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records,
             "attributes_json":json.dumps({
                 "supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
                 "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],
-                "scanner":"v1.8.12-image-card"
+                "scanner":"v1.8.13-image-card"
             },ensure_ascii=False)
         })
     return out
@@ -1852,7 +1884,7 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=150):
                 "ocr_engine":eng,"ocr_dpi":pass_dpi,"ocr_confidence":round(ocr_conf,3),
                 "scanner_confidence":round(scanner_conf,3),
                 "sku_bbox":[round(x1,1),round(y1,1),round(x2,1),round(y2,1)],
-                "price_source":"missing","scanner":"v1.8.12-adaptive-high-intelligence"
+                "price_source":"missing","scanner":"v1.8.13-adaptive-high-intelligence"
             },ensure_ascii=False)
         })
 
@@ -2356,7 +2388,7 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
     return records
 
 
-# v1.8.12 Order-form / dual-price catalogue parser
+# v1.8.13 Order-form / dual-price catalogue parser
 
 _BAD_ITEM_WORDS_V181 = {"price","total","note","see","page","item","kit","qty","quantity","terms","handling","tax"}
 
@@ -2521,7 +2553,7 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     return records if len(good)>=3 else []
 
 
-# v1.8.12 regression parsers: standard B2B tables, no-SKU price tables,
+# v1.8.13 regression parsers: standard B2B tables, no-SKU price tables,
 # tiered services and vehicle multi-price rows.
 def _parse_price_v183(value):
     t=clean_text(value)
@@ -3424,7 +3456,7 @@ def smart_import_pdf(
             sample_texts.append("")
     doc_safety=_document_type_safety_v18(sample_texts)
     if doc_safety.get("type") in {"technical-datasheet","statistical-report"}:
-        # v1.8.12 hybrid protection: a sample may look like a datasheet while a real
+        # v1.8.13 hybrid protection: a sample may look like a datasheet while a real
         # price list exists elsewhere. Probe pages one-by-one without retaining text.
         hybrid_commercial_page=None
         for probe_idx in range(total_pages):
@@ -3462,11 +3494,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.12"
+        and str(manifest.get("version", "")) == "1.8.13"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.12", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.13", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3543,7 +3575,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.12", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.13", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
