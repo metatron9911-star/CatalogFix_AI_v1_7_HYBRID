@@ -16,6 +16,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cache OCR models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rapidocr
+            ~/.cache/onnxruntime
+          key: ${{ runner.os }}-ocr-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ocr-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -41,6 +51,8 @@ jobs:
             echo "GIT_SHA=$GITHUB_SHA"
             echo "RELEASE_VERSION=$RELEASE_VERSION"
             echo "CHECKPOINT_VERSION=$CHECKPOINT_VERSION"
+            python --version
+            python -m pip freeze | grep -Ei '^(rapidocr|onnxruntime|PyMuPDF|pdfplumber)==' || true
           } > CatalogFix_AI_v1_8_15/BUILD_INFO.txt
 
       - name: Upload source ZIP
