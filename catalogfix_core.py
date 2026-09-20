@@ -3626,20 +3626,36 @@ def smart_import_pdf(
         fitz_doc.close()
 
     imported = _dedupe_imported(all_records)
-    # Strong structured order-form extraction dominates weak heuristic rows from the
-    # same document. This prevents stray OCR/text tokens from surviving beside a
-    # complete trusted order form (e.g. IMSAI front-matter artifacts).
+    suppression_stats={
+        "weak_heuristic_rows_suppressed":0,
+        "weak_heuristic_suppression_reason":"",
+    }
+    # Strong structured order-form extraction may dominate stray heuristic rows from
+    # the same document. Suppression is intentionally conservative: relative dominance
+    # plus no price plus a clearly weak title/SKU signal.
     if imported is not None and not imported.empty and "import_method" in imported.columns:
         trusted_order_count=int((imported["import_method"].astype(str) == "order-form-dual-price").sum())
-        if trusted_order_count >= 10:
+        total_product_like_rows=max(1, len(imported))
+        dominance_threshold=max(10, int(math.ceil(0.20 * total_product_like_rows)))
+        if trusted_order_count >= dominance_threshold:
             weak_methods={"pattern-id","row-price","text-row-price"}
             def _weak_unpriced(r):
                 if clean_text(r.get("import_method","")) not in weak_methods:
                     return False
                 p=parse_price(r.get("price",""))
-                return pd.isna(p) or not clean_text(r.get("title","")) or clean_text(r.get("title","")) == clean_text(r.get("sku",""))
+                if not pd.isna(p):
+                    return False
+                title=clean_text(r.get("title",""))
+                sku=clean_text(r.get("sku",""))
+                low=title.lower()
+                very_short=(len(title) <= 3 or len(title.split()) <= 1)
+                noise_word=(norm_header(title) in _BAD_ITEM_WORDS_V181 or norm_header(sku) in _BAD_ITEM_WORDS_V181)
+                same_title=bool(title and sku and title == sku)
+                return (not title) or same_title or very_short or noise_word
             drop_idx=[i for i,r in imported.iterrows() if _weak_unpriced(r)]
             if drop_idx:
+                suppression_stats["weak_heuristic_rows_suppressed"]=len(drop_idx)
+                suppression_stats["weak_heuristic_suppression_reason"]="orderform-dominance"
                 imported=imported.drop(index=drop_idx).reset_index(drop=True)
     imported, recovery_stats = title_recovery_and_multicard_v176(imported)
     # Re-dedupe in case a split card was also discovered independently elsewhere.
@@ -3649,6 +3665,7 @@ def smart_import_pdf(
     imported, quality_stats = quality_intelligence_v17(imported)
     quality_stats.update(recovery_stats)
     quality_stats.update(text_stats)
+    quality_stats.update(suppression_stats)
     report = pd.DataFrame(page_report)
     route_counts = Counter(page_routes.values())
     meta = {
