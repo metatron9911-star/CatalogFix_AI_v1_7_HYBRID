@@ -2278,7 +2278,7 @@ def _looks_like_item_code_v181(value):
     if not re.search(r"[A-Za-z0-9]", t): return False
     if re.search(r"\b(?:price|description|qty|total|handling|tax|terms)\b", t, re.I): return False
     # Require a compact catalogue identifier, not prose.
-    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ./\-]{0,22}", t)) and len(t.split())<=4)
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ./\-]{0,22}", t)) and len(t.split())<=4
 
 def extract_order_form_products_v181(page, page_text, source_name, filename="", page_num=None):
     """Parse catalogue/order-form pages with ITEM NO + DESCRIPTION + KIT/ASSEMBLED prices.
