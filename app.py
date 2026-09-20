@@ -14,8 +14,8 @@ from catalogfix_core import (
     to_excel_bytes,
 )
 
-st.set_page_config(page_title="CatalogFix AI v1.8.10", page_icon="🧹", layout="wide")
-st.title("CatalogFix AI v1.8.10")
+st.set_page_config(page_title="CatalogFix AI v1.8.11", page_icon="🧹", layout="wide")
+st.title("CatalogFix AI v1.8.11")
 st.caption("Hybrid Quality Intelligence: universal routing + visual layout intelligence + context memory + dedupe + sanity checks + QA")
 
 st.info("Hybrid Quality Intelligence is ON: universal page routing + multi-pass visual OCR + page-context category memory + conservative dimension sanity checks + visual duplicate suppression + confidence/QA. Large PDFs autosave and resume after interruption.")
@@ -99,6 +99,10 @@ if imported.empty:
         st.caption(f"Pages checked: {pdf_meta.get('total_pages', 0)} • safety gate: {dtype}")
         st.dataframe(import_report, use_container_width=True)
         st.stop()
+    if name_l.endswith(".pdf") and (pdf_meta or {}).get("document_type") == "unknown":
+        st.warning("No product rows were detected from the PDF text layer. This usually means the file is image-only or has no usable embedded text, so OCR/visual routing is required.")
+        st.dataframe(import_report, use_container_width=True)
+        st.stop()
     st.error("No product-like rows were detected. This file needs another importer rule.")
     st.stop()
 
@@ -172,14 +176,14 @@ excel_result = to_excel_bytes(cleaned, issues, shop_ready, needs_review, import_
 st.download_button(
     "Download full result (.xlsx)",
     excel_result,
-    file_name="CatalogFix_Result_v1_8_10.xlsx",
+    file_name="CatalogFix_Result_v1_8_11.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
 st.download_button(
     "Download safe Shopify-ready CSV",
     shop_ready.to_csv(index=False).encode("utf-8-sig"),
-    file_name="Shopify_Ready_v1_8_10.csv",
+    file_name="Shopify_Ready_v1_8_11.csv",
     mime="text/csv",
     disabled=shop_ready.empty,
 )
