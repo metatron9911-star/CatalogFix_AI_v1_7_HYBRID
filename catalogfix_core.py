@@ -489,6 +489,13 @@ def _dedupe_imported(records):
         merged.append(base[columns].to_dict())
 
     if not without_sku.empty:
+        sig_cols=[c for c in ["title","size","variant_group","source_page"] if c in without_sku.columns]
+        if sig_cols:
+            tmp=without_sku.copy()
+            for c in sig_cols:
+                tmp[c]=tmp[c].map(lambda x: clean_text(x).lower())
+            keep_idx=tmp.drop_duplicates(subset=sig_cols,keep="first").index
+            without_sku=without_sku.loc[keep_idx]
         merged.extend(without_sku[columns].to_dict("records"))
 
     out = pd.DataFrame(merged, columns=columns)
@@ -1612,21 +1619,37 @@ def _visual_card_fallback(page_num, boxes, image_shape, existing_records, page_h
     return out
 
 
+
 def _visual_price_value(text):
     t=clean_text(text).replace("₹","").replace("/-","").strip()
-    if not t:return None
-    m=re.search(r"(?:[$€£₹]|\b(?:USD|EUR|GBP|INR|ZAR|RM|R)\b)?\s*([0-9][0-9 ,.]{0,16}[0-9])",t,re.I)
-    if not m:return None
-    raw=re.sub(r"\s+","",m.group(1))
-    if raw.count(",")>=1 and "." not in raw:
+    if not t:
+        return None
+    m=re.search(r"(?:[$€£₹₽]|\b(?:USD|EUR|GBP|INR|ZAR|RM|R)\b)?\s*([0-9][0-9 .,'’]{0,18}[0-9]|[0-9])",t,re.I)
+    if not m:
+        return None
+    raw=re.sub(r"[\s'’]","",m.group(1))
+    if "," in raw and "." in raw:
+        # Right-most separator is decimal; the other is grouping.
+        if raw.rfind(",") > raw.rfind("."):
+            raw=raw.replace(".","").replace(",",".")
+        else:
+            raw=raw.replace(",","")
+    elif "," in raw:
         parts=raw.split(",")
-        if len(parts)>2 or (len(parts)==2 and len(parts[-1])==3):raw="".join(parts)
-        else:raw=raw.replace(",",".")
-    else:raw=raw.replace(",","")
+        if len(parts)>2 or (len(parts)==2 and len(parts[-1])==3):
+            raw="".join(parts)
+        else:
+            raw=raw.replace(",",".")
+    elif "." in raw:
+        parts=raw.split(".")
+        # Single . with exactly three trailing digits is usually a thousands separator.
+        if len(parts)>2 or (len(parts)==2 and len(parts[-1])==3 and len(parts[0])>=1):
+            raw="".join(parts)
     try:
-        v=float(raw);return v if 0<v<1e9 else None
-    except Exception:return None
-
+        v=float(raw)
+        return v if 0 < v < 1e9 else None
+    except Exception:
+        return None
 
 def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records, filename="", page_heading=""):
     """Review-only recovery for image-only catalogues with product name + visible price."""
@@ -1743,7 +1766,7 @@ def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records,
         used.add(key)
 
         import hashlib
-        local_id="ROW-"+hashlib.sha1(f"{page_num}|{title}|{price}".encode("utf-8")).hexdigest()[:12].upper()
+        local_id="CAND-"+hashlib.sha1(f"{page_num}|{title}|{price}".encode("utf-8")).hexdigest()[:12].upper()
         out.append({
             "sku":local_id,"title":title,"brand":brand,"price":price,"category":cat,"size":"","color":"",
             "description":title,"barcode":"","source_sheet":f"PDF p.{page_num}","source_row":page_num,"supplier_code":"",
@@ -1755,7 +1778,7 @@ def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records,
             "attributes_json":json.dumps({
                 "supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
                 "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],
-                "scanner":"v1.8.10-image-card"
+                "scanner":"v1.8.11-image-card"
             },ensure_ascii=False)
         })
     return out
@@ -1829,7 +1852,7 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=150):
                 "ocr_engine":eng,"ocr_dpi":pass_dpi,"ocr_confidence":round(ocr_conf,3),
                 "scanner_confidence":round(scanner_conf,3),
                 "sku_bbox":[round(x1,1),round(y1,1),round(x2,1),round(y2,1)],
-                "price_source":"missing","scanner":"v1.8.10-adaptive-high-intelligence"
+                "price_source":"missing","scanner":"v1.8.11-adaptive-high-intelligence"
             },ensure_ascii=False)
         })
 
@@ -2317,14 +2340,26 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
     return records
 
 
-# v1.8.10 Order-form / dual-price catalogue parser
+# v1.8.11 Order-form / dual-price catalogue parser
+
+_BAD_ITEM_WORDS_V181 = {"price","total","note","see","page","item","kit","qty","quantity","terms","handling","tax"}
+
 def _looks_like_item_code_v181(value):
     t=clean_text(value)
-    if not t or len(t)>24: return False
-    if not re.search(r"[A-Za-z0-9]", t): return False
-    if re.search(r"\b(?:price|description|qty|total|handling|tax|terms)\b", t, re.I): return False
-    # Require a compact catalogue identifier, not prose.
-    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ./\-]{0,22}", t)) and len(t.split())<=4
+    if not t or len(t)>24:
+        return False
+    low=t.lower().strip(" .:-")
+    if low in _BAD_ITEM_WORDS_V181:
+        return False
+    if re.search(r"\b(?:price|description|qty|quantity|total|handling|tax|terms|note|page)\b", t, re.I):
+        return False
+    # Order-form supplier codes should carry at least one digit. This prevents prose
+    # like "See note" from being promoted to a real catalogue identifier.
+    if not re.search(r"\d", t):
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ./\-]{0,22}", t):
+        return False
+    return len(t.split()) <= 4
 
 def extract_order_form_products_v181(page, page_text, source_name, filename="", page_num=None):
     """Parse catalogue/order-form pages with ITEM NO + DESCRIPTION + KIT/ASSEMBLED prices.
@@ -2470,7 +2505,7 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     return records if len(good)>=3 else []
 
 
-# v1.8.10 regression parsers: standard B2B tables, no-SKU price tables,
+# v1.8.11 regression parsers: standard B2B tables, no-SKU price tables,
 # tiered services and vehicle multi-price rows.
 def _parse_price_v183(value):
     t=clean_text(value)
@@ -2578,7 +2613,7 @@ def extract_standard_commercial_table_v183(raw,source_name,filename="",page_num=
 def _synthetic_row_sku_v186(*parts):
     import hashlib
     base="|".join(clean_text(x) for x in parts if clean_text(x))
-    return "ROW-"+hashlib.sha1(base.encode("utf-8")).hexdigest()[:12].upper()
+    return "CAND-"+hashlib.sha1(base.encode("utf-8")).hexdigest()[:12].upper()
 
 def extract_named_price_table_v186(raw,source_name,filename="",page_num=None):
     if raw is None or raw.empty or raw.shape[1]<2:return []
@@ -3392,11 +3427,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.10"
+        and str(manifest.get("version", "")) == "1.8.11"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.10", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.11", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3443,11 +3478,12 @@ def smart_import_pdf(
                 route = page_routes.get(page_num, "TEXT_OTHER")
                 page_name = f"PDF p.{page_num}"
                 if route == "VISUAL":
-                    if not visual_ocr:
+                    if not visual_ocr or fitz_doc is None:
+                        status="visual-ocr-disabled" if not visual_ocr else "visual-ocr-unavailable"
                         chunk_report.append({"sheet":page_name,"source_rows":0,"source_columns":0,
                             "matrix_products":0,"dimension_products":0,"row_price_products":0,
                             "header_products":0,"pattern_products":0,"visual_products":0,
-                            "router_type":"VISUAL","scan_status":"visual-ocr-disabled"})
+                            "router_type":"VISUAL","scan_status":status})
                         continue
                     try:
                         recs, rep = extract_visual_catalog_products(fitz_doc, page_num, filename=filename, dpi=ocr_dpi)
@@ -3472,7 +3508,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.10", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.11", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
