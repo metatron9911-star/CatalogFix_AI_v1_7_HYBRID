@@ -1627,62 +1627,137 @@ def _visual_price_value(text):
         v=float(raw);return v if 0<v<1e9 else None
     except Exception:return None
 
-def _visual_named_price_fallback(page_num,boxes,image_shape,existing_records,filename="",page_heading=""):
-    """Review-only recovery for image-only brochure cards with name + literal Price."""
-    if existing_records or not boxes:return []
-    h,w=image_shape[:2];pairs=[]
-    for label in boxes:
-        if not re.fullmatch(r"price[:：]?",clean_text(label.get("text","")),re.I):continue
-        lx,ly=_bbox_center(label["bbox"]);cand=[]
+
+def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records, filename="", page_heading=""):
+    """Review-only recovery for image-only catalogues with product name + visible price."""
+    if not boxes:
+        return []
+    h,w=image_shape[:2]
+    if any(clean_text(r.get("supplier_code","")) for r in existing_records):
+        return []
+
+    def xy(b):
+        return _bbox_center(b["bbox"])
+
+    def price_value(b):
+        text=clean_text(b.get("text",""))
+        val=_visual_price_value(text)
+        if val is None:
+            return None
+        if re.search(r"(?:[$€£₹₽]|/-|\b(?:USD|EUR|GBP|INR|ZAR|RM)\b)", text, re.I):
+            return val
+        bx,by=xy(b)
+        for q in boxes:
+            qx,qy=xy(q)
+            if re.fullmatch(r"(?:list\s*)?price[:：]?", clean_text(q.get("text","")), re.I) and abs(qy-by)<.045*h and 0 <= bx-qx < .18*w:
+                return val
+        return None
+
+    prices=[]
+    for b in boxes:
+        val=price_value(b)
+        if val is not None and float(b.get("score",0) or 0)>=.30:
+            bx,by=xy(b)
+            prices.append((by,bx,b,val))
+    if not prices:
+        return []
+    prices.sort()
+
+    compact=[]
+    for by,bx,b,val in prices:
+        if any(abs(by-y)<.018*h and abs(bx-x)<.035*w and abs(val-v)<.01 for y,x,_,v in compact):
+            continue
+        compact.append((by,bx,b,val))
+    prices=compact
+
+    known_bad=re.compile(
+        r"\b(material|width|control|speed|motor|lighting|filter|outlet|model|size|power|airflow|sensor|heat|type|suction|remote|stainless|glass|touch|gesture|yes|no|aluminium|aluminum|copper|collector|body|panel|voltage|frequency|capacity|dimensions?|watt|rpm|duct|finish|colour|color|warranty|input|output)\b",
+        re.I
+    )
+    category_words=re.compile(r"\b(hood|hob|induction|cooktop|cooking range|refrigerator|fridge|freezer|chiller|microwave|oven|dishwasher|washer|dryer|appliance)\b",re.I)
+
+    joined=" ".join(clean_text(b.get("text","")) for b in boxes)
+    brand=""
+    for known in ("CARYSIL","ORIFLAME","FIAT","IMSAI","ROCA"):
+        if known.lower() in joined.lower() or known.lower() in (filename or "").lower():
+            brand=known.title()
+            break
+
+    cat=page_heading if page_heading and page_heading!="Visual Catalog" else ""
+    if not cat:
+        cc=[]
         for b in boxes:
-            if b is label:continue
-            bx,by=_bbox_center(b["bbox"])
-            if bx<=lx or bx-lx>.22*w or abs(by-ly)>.035*h:continue
-            rawp=clean_text(b.get("text",""))
-            if not re.search(r"(?:/-|[$€£₹]|\d[, ]\d{3}|\d{4,})",rawp):continue
-            val=_visual_price_value(rawp)
-            if val is not None:cand.append((abs(by-ly)+.12*abs(bx-lx),b,val))
-        if cand:
-            cand.sort(key=lambda z:z[0]);_,pb,val=cand[0];pairs.append((label,pb,val))
-    if not pairs:return []
-    bad=re.compile(r"\b(material|width|control|speed|motor|lighting|filter|outlet|model|size|power|airflow|sensor|heat|type|upto|yes|no|touch|gesture|suction|collector|body|glass|silent|panel|white|black|silver|red|grey|gray)\b",re.I)
-    out=[];used=set()
-    for label,pb,price in pairs:
-        lx,ly=_bbox_center(label["bbox"]);same=[]
-        for other,_,_ in pairs:
-            ox,oy=_bbox_center(other["bbox"])
-            if oy<ly and abs(ox-lx)<.08*w:same.append(oy)
-        lower=max(same) if same else -1;expected_x=lx-.235*w;cands=[]
+            text=clean_text(b.get("text",""))
+            if category_words.search(text) and len(text)<=35:
+                _,cy=xy(b)
+                cc.append((cy,text))
+        if cc:
+            cc.sort()
+            cat=cc[0][1]
+    cat=cat or "Visual Catalog"
+
+    out=[]
+    used=set()
+    for by,bx,pb,price in prices:
+        side=0 if bx < .5*w else 1
+        prev_y=-1
+        for oy,ox,_,_ in prices:
+            if oy>=by:
+                break
+            if (0 if ox<.5*w else 1)==side and abs(ox-bx)<.25*w:
+                prev_y=max(prev_y,oy)
+        top=max(0,prev_y+.018*h)
+        left=0 if side==0 else .48*w
+        right=.55*w if side==0 else w
+
+        candidates=[]
         for b in boxes:
-            text=clean_text(b.get("text",""));bx,by=_bbox_center(b["bbox"])
-            if not (lower+.035*h<by<ly-.03*h):continue
-            if abs(bx-expected_x)>.13*w or len(text)<3 or len(text)>40 or bad.search(text):continue
-            words=re.findall(r"[A-Za-z][A-Za-z'-]*",text);letters="".join(words)
-            if not words or len(words)>5 or len(letters)<4:continue
-            if text.strip().upper() in {"CARYSIL","ORIFLAME","FIAT","IMSAI","ROCA","PRICE","CEILING HOOD","ISLAND HOOD","BUILT-IN HOOD"}:continue
-            if not (text[:1].isupper() or text.isupper()):continue
-            if _visual_codes_from_text(text) or _visual_price_value(text) is not None:continue
-            score=(by-lower if lower>=0 else by)/max(h,1)+.35*abs(bx-expected_x)/max(w,1)-.03*float(b.get("score",0) or 0)
-            cands.append((score,text,b))
-        if not cands:continue
-        cands.sort(key=lambda z:z[0]);title=cands[0][1].strip(" .:-")
-        key=(title.lower(),round(price,2))
-        if key in used:continue
+            text=clean_text(b.get("text","")).strip(" .:;-")
+            if not text:
+                continue
+            tx,ty=xy(b)
+            if not (left<=tx<=right and top<ty<by-.035*h):
+                continue
+            if len(text)<3 or len(text)>48 or known_bad.search(text):
+                continue
+            if re.fullmatch(r"(?:price|carysil|ceiling hood|island hood|built-in hood|smart hoods?)",text,re.I):
+                continue
+            if re.search(r"(?:[$€£₹₽]|/-)",text) or re.fullmatch(r"[\d\s.,x×*/%+-]+",text):
+                continue
+            if _visual_codes_from_text(text):
+                continue
+            words=re.findall(r"[A-Za-z][A-Za-z'&.-]*",text)
+            if not words or len(words)>6 or len("".join(words))<4:
+                continue
+            score=(ty-top)/max(h,1)+.18*abs(tx-(left+.10*w))/max(w,1)+.02*len(words)
+            if category_words.search(text):
+                score+=.22
+            candidates.append((score,ty,text,b))
+        if not candidates:
+            continue
+        candidates.sort(key=lambda z:(z[0],z[1]))
+        title=candidates[0][2]
+        key=(title.lower(),round(price,2),page_num)
+        if key in used:
+            continue
         used.add(key)
+
         import hashlib
         local_id="ROW-"+hashlib.sha1(f"{page_num}|{title}|{price}".encode("utf-8")).hexdigest()[:12].upper()
-        joined=" ".join(clean_text(b.get("text","")) for b in boxes[:100]);brand=""
-        for known in ("CARYSIL","ORIFLAME","FIAT","IMSAI","ROCA"):
-            if known.lower() in joined.lower() or known.lower() in (filename or "").lower():brand=known.title();break
-        cat=page_heading if page_heading and page_heading!="Visual Catalog" else "Visual Catalog"
-        out.append({"sku":local_id,"title":title,"brand":brand,"price":price,"category":cat,"size":"","color":"",
-          "description":title,"barcode":"","source_sheet":f"PDF p.{page_num}","source_row":page_num,"supplier_code":"",
-          "import_confidence":"MEDIUM","import_method":"visual-named-price-card","source_page":page_num,
-          "source_table":"visual-price-card","matrix_series":cat,"matrix_section":"Image-only price card","matrix_model":"",
-          "variant_group":title,"variant_codes":"","currency":"","vat_note":"","visual_confidence":round(float(label.get("score",0) or .5),3),
-          "router_type":"VISUAL_ADAPTIVE","quality_flags":"supplier_sku_missing","category_source":"visual-card",
-          "attributes_json":json.dumps({"supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
-             "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],"scanner":"v1.8.9-image-card"},ensure_ascii=False)})
+        out.append({
+            "sku":local_id,"title":title,"brand":brand,"price":price,"category":cat,"size":"","color":"",
+            "description":title,"barcode":"","source_sheet":f"PDF p.{page_num}","source_row":page_num,"supplier_code":"",
+            "import_confidence":"MEDIUM","import_method":"visual-named-price-card","source_page":page_num,
+            "source_table":"visual-price-card","matrix_series":cat,"matrix_section":"Image-only price card","matrix_model":"",
+            "variant_group":title,"variant_codes":"","currency":"INR" if ("₹" in joined or "/-" in clean_text(pb.get("text",""))) else "",
+            "vat_note":"","visual_confidence":round(float(pb.get("score",0) or .5),3),"router_type":"VISUAL_ADAPTIVE",
+            "quality_flags":"supplier_sku_missing","category_source":"visual-card",
+            "attributes_json":json.dumps({
+                "supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
+                "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],
+                "scanner":"v1.8.10-image-card"
+            },ensure_ascii=False)
+        })
     return out
 
 def extract_visual_catalog_products(doc, page_num, filename="", dpi=140):
