@@ -3629,12 +3629,14 @@ def smart_import_pdf(
     suppression_stats={
         "weak_heuristic_rows_suppressed":0,
         "weak_heuristic_suppression_reason":"",
+        "suppressed_rows":[],
     }
     # Strong structured order-form extraction may dominate stray heuristic rows from
     # the same document. Suppression is intentionally conservative: relative dominance
     # plus no price plus a clearly weak title/SKU signal.
     if imported is not None and not imported.empty and "import_method" in imported.columns:
         trusted_order_count=int((imported["import_method"].astype(str) == "order-form-dual-price").sum())
+        # product_like_rows is the pre-suppression imported row count, including trusted and weak heuristic rows.
         total_product_like_rows=max(1, len(imported))
         dominance_threshold=max(10, int(math.ceil(0.20 * total_product_like_rows)))
         if trusted_order_count >= dominance_threshold:
@@ -3656,6 +3658,15 @@ def smart_import_pdf(
             if drop_idx:
                 suppression_stats["weak_heuristic_rows_suppressed"]=len(drop_idx)
                 suppression_stats["weak_heuristic_suppression_reason"]="orderform-dominance"
+                suppression_stats["suppressed_rows"]=[
+                    {
+                        "sku":clean_text(imported.at[i,"sku"]) if "sku" in imported.columns else "",
+                        "title":clean_text(imported.at[i,"title"]) if "title" in imported.columns else "",
+                        "import_method":clean_text(imported.at[i,"import_method"]) if "import_method" in imported.columns else "",
+                        "source_row":imported.at[i,"source_row"] if "source_row" in imported.columns else "",
+                    }
+                    for i in drop_idx
+                ]
                 imported=imported.drop(index=drop_idx).reset_index(drop=True)
     imported, recovery_stats = title_recovery_and_multicard_v176(imported)
     # Re-dedupe in case a split card was also discovered independently elsewhere.
@@ -3667,6 +3678,12 @@ def smart_import_pdf(
     quality_stats.update(text_stats)
     quality_stats.update(suppression_stats)
     report = pd.DataFrame(page_report)
+    if suppression_stats.get("suppressed_rows"):
+        suppressed_df=pd.DataFrame(suppression_stats["suppressed_rows"])
+        suppressed_df["sheet"]="Suppressed Rows"
+        suppressed_df["router_type"]="QA_SUPPRESSION"
+        suppressed_df["scan_status"]="suppressed-orderform-dominance"
+        report=pd.concat([report, suppressed_df], ignore_index=True, sort=False)
     route_counts = Counter(page_routes.values())
     meta = {
         "job_id":job_id, "checkpoint_folder":str(job_dir), "chunk_size":chunk_size,
