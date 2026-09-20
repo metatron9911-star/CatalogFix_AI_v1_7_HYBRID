@@ -2558,122 +2558,69 @@ def extract_vehicle_price_v186(page_text,source_name,filename="",page_num=None):
 
 
 def _parse_pdf_page_v13(page, page_num, page_text, filename=""):
-    """Parse one PDF page using the v1.3 detection stack."""
-    page_name = f"PDF p.{page_num}"
-    page_series_hint = _series_from_page_text(page_text) or _generic_page_series(page_text, page_num)
-    header_count = pattern_count = matrix_count = dimension_count = row_count = 0
-    source_rows = source_columns = 0
-    records = []
+    page_name=f"PDF p.{page_num}"
+    page_series_hint=_series_from_page_text(page_text) or _generic_page_series(page_text,page_num)
+    header_count=pattern_count=matrix_count=dimension_count=row_count=0
+    source_rows=source_columns=0; records=[]
 
-    order_records = extract_order_form_products_v181(page, page_text, page_name, filename=filename, page_num=page_num)
+    vehicle_records=extract_vehicle_price_v186(page_text,page_name,filename=filename,page_num=page_num)
+    if vehicle_records:
+        return vehicle_records,{"sheet":page_name,"source_rows":len(vehicle_records),"source_columns":0,"matrix_products":0,"dimension_products":0,"row_price_products":len(vehicle_records),"header_products":0,"pattern_products":0,"product_card_products":0,"scan_status":"parsed-vehicle-price"}
+
+    order_records=extract_order_form_products_v181(page,page_text,page_name,filename=filename,page_num=page_num)
     if order_records:
-        records.extend(order_records)
-        return records, {
-            "sheet": page_name, "source_rows": len(order_records), "source_columns": 0,
-            "matrix_products": 0, "dimension_products": 0, "row_price_products": len(order_records),
-            "header_products": 0, "pattern_products": 0, "product_card_products": 0,
-            "scan_status": "parsed-order-form",
-        }
+        return order_records,{"sheet":page_name,"source_rows":len(order_records),"source_columns":0,"matrix_products":0,"dimension_products":0,"row_price_products":len(order_records),"header_products":0,"pattern_products":0,"product_card_products":0,"scan_status":"parsed-order-form"}
 
-    card_records = extract_product_card_products_from_text(page_text, page_name, filename=filename, page_num=page_num)
+    card_records=extract_product_card_products_from_text(page_text,page_name,filename=filename,page_num=page_num)
     if card_records:
-        # A coherent catalogue card outranks generic row/table regexes. Returning here is deliberate:
-        # it prevents promo numbers, page references and campaign thresholds from becoming products.
-        records.extend(card_records)
-        return records, {
-            "sheet": page_name, "source_rows": len([x for x in page_text.splitlines() if clean_text(x)]),
-            "source_columns": 0, "matrix_products": 0, "dimension_products": 0, "row_price_products": 0,
-            "header_products": 0, "pattern_products": 0, "product_card_products": len(card_records),
-            "scan_status": "parsed-product-card",
-        }
+        return card_records,{"sheet":page_name,"source_rows":len([x for x in page_text.splitlines() if clean_text(x)]),"source_columns":0,"matrix_products":0,"dimension_products":0,"row_price_products":0,"header_products":0,"pattern_products":0,"product_card_products":len(card_records),"scan_status":"parsed-product-card"}
 
-    table_raws = _pdf_tables_to_raw(page)
-    for table_idx, raw in enumerate(table_raws, start=1):
-        if raw.empty:
-            continue
-        source_rows += len(raw)
-        source_columns = max(source_columns, raw.shape[1])
+    table_raws=_pdf_tables_to_raw(page)
+    for table_idx,raw in enumerate(table_raws,start=1):
+        if raw.empty:continue
+        source_rows+=len(raw);source_columns=max(source_columns,raw.shape[1])
 
-        matrix_records = extract_matrix_products(
-            raw, f"{page_name} T{table_idx}", filename=filename,
-            page_num=page_num, table_index=table_idx, series_hint=page_series_hint,
-        )
-        if matrix_records:
-            matrix_count += len(matrix_records)
-            records.extend(matrix_records)
-            continue
+        tiered=extract_tiered_service_table_v186(raw,f"{page_name} T{table_idx}",filename=filename,page_num=page_num)
+        if tiered:row_count+=len(tiered);records.extend(tiered);continue
 
-        dimension_records = extract_dimension_matrix_products(
-            raw, f"{page_name} T{table_idx}", filename=filename,
-            page_num=page_num, table_index=table_idx, series_hint=page_series_hint,
-        )
-        if dimension_records:
-            dimension_count += len(dimension_records)
-            records.extend(dimension_records)
-            continue
+        standard=extract_standard_commercial_table_v183(raw,f"{page_name} T{table_idx}",filename=filename,page_num=page_num)
+        if standard:row_count+=len(standard);records.extend(standard);continue
 
-        row_records = extract_tabular_price_products(
-            raw, f"{page_name} T{table_idx}", filename=filename,
-            page_num=page_num, table_index=table_idx, series_hint=page_series_hint,
-        )
-        if row_records:
-            row_count += len(row_records)
-            records.extend(row_records)
-            continue
+        named=extract_named_price_table_v186(raw,f"{page_name} T{table_idx}",filename=filename,page_num=page_num)
+        if named:row_count+=len(named);records.extend(named);continue
 
-        brand = _infer_brand(raw, filename)
-        headers = extract_header_blocks(raw, f"{page_name} T{table_idx}", brand=brand)
-        patterns = extract_pattern_products(raw, f"{page_name} T{table_idx}", filename=filename)
-        header_count += len(headers)
-        pattern_count += len(patterns)
-        records.extend(headers)
-        records.extend(patterns)
+        matrix_records=extract_matrix_products(raw,f"{page_name} T{table_idx}",filename=filename,page_num=page_num,table_index=table_idx,series_hint=page_series_hint)
+        if matrix_records:matrix_count+=len(matrix_records);records.extend(matrix_records);continue
 
-    # Coordinate fallback for pages that structured extraction did not resolve.
-    if matrix_count == 0 and dimension_count == 0:
-        line_raw = _pdf_words_to_raw(page)
+        dimension_records=extract_dimension_matrix_products(raw,f"{page_name} T{table_idx}",filename=filename,page_num=page_num,table_index=table_idx,series_hint=page_series_hint)
+        if dimension_records:dimension_count+=len(dimension_records);records.extend(dimension_records);continue
+
+        row_records=extract_tabular_price_products(raw,f"{page_name} T{table_idx}",filename=filename,page_num=page_num,table_index=table_idx,series_hint=page_series_hint)
+        if row_records:row_count+=len(row_records);records.extend(row_records);continue
+
+        brand=_infer_brand(raw,filename)
+        headers=extract_header_blocks(raw,f"{page_name} T{table_idx}",brand=brand)
+        patterns=extract_pattern_products(raw,f"{page_name} T{table_idx}",filename=filename)
+        header_count+=len(headers);pattern_count+=len(patterns);records.extend(headers);records.extend(patterns)
+
+    if matrix_count==0 and dimension_count==0:
+        line_raw=_pdf_words_to_raw(page)
         if not line_raw.empty:
-            source_rows += len(line_raw)
-            source_columns = max(source_columns, line_raw.shape[1])
-            matrix_records = extract_matrix_products(
-                line_raw, page_name, filename=filename, page_num=page_num, table_index="words",
-                series_hint=page_series_hint,
-            )
-            if matrix_records:
-                matrix_count += len(matrix_records)
-                records.extend(matrix_records)
+            source_rows+=len(line_raw);source_columns=max(source_columns,line_raw.shape[1])
+            mr=extract_matrix_products(line_raw,page_name,filename=filename,page_num=page_num,table_index="words",series_hint=page_series_hint)
+            if mr:matrix_count+=len(mr);records.extend(mr)
             else:
-                dimension_records = extract_dimension_matrix_products(
-                    line_raw, page_name, filename=filename, page_num=page_num, table_index="words",
-                    series_hint=page_series_hint,
-                )
-                if dimension_records:
-                    dimension_count += len(dimension_records)
-                    records.extend(dimension_records)
+                dr=extract_dimension_matrix_products(line_raw,page_name,filename=filename,page_num=page_num,table_index="words",series_hint=page_series_hint)
+                if dr:dimension_count+=len(dr);records.extend(dr)
 
-    # Row-price lists (handles, hardware, locks, accessories) parsed from text.
-    if matrix_count == 0 and dimension_count == 0 and row_count == 0 and not card_records and _looks_like_price_page(page_text):
-        row_records = extract_row_price_products_from_text(
-            page_text, page_name, filename=filename, page_num=page_num, series_hint=page_series_hint
-        )
-        if row_records:
-            row_count += len(row_records)
-            records.extend(row_records)
+    if matrix_count==0 and dimension_count==0 and row_count==0 and not card_records and _looks_like_price_page(page_text):
+        rr=extract_row_price_products_from_text(page_text,page_name,filename=filename,page_num=page_num,series_hint=page_series_hint)
+        if rr:row_count+=len(rr);records.extend(rr)
 
-    report_row = {
-        "sheet": page_name,
-        "source_rows": source_rows,
-        "source_columns": source_columns,
-        "matrix_products": matrix_count,
-        "dimension_products": dimension_count,
-        "row_price_products": row_count,
-        "header_products": header_count,
-        "pattern_products": pattern_count,
-        "product_card_products": len(card_records),
-        "scan_status": "parsed",
-    }
-    return records, report_row
-
+    report_row={"sheet":page_name,"source_rows":source_rows,"source_columns":source_columns,
+      "matrix_products":matrix_count,"dimension_products":dimension_count,"row_price_products":row_count,
+      "header_products":header_count,"pattern_products":pattern_count,"product_card_products":len(card_records),"scan_status":"parsed"}
+    return records,report_row
 
 # -----------------------------
 # v1.7 Hybrid Quality Intelligence
