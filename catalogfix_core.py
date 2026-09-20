@@ -3626,6 +3626,21 @@ def smart_import_pdf(
         fitz_doc.close()
 
     imported = _dedupe_imported(all_records)
+    # Strong structured order-form extraction dominates weak heuristic rows from the
+    # same document. This prevents stray OCR/text tokens from surviving beside a
+    # complete trusted order form (e.g. IMSAI front-matter artifacts).
+    if imported is not None and not imported.empty and "import_method" in imported.columns:
+        trusted_order_count=int((imported["import_method"].astype(str) == "order-form-dual-price").sum())
+        if trusted_order_count >= 10:
+            weak_methods={"pattern-id","row-price","text-row-price"}
+            def _weak_unpriced(r):
+                if clean_text(r.get("import_method","")) not in weak_methods:
+                    return False
+                p=parse_price(r.get("price",""))
+                return pd.isna(p) or not clean_text(r.get("title","")) or clean_text(r.get("title","")) == clean_text(r.get("sku",""))
+            drop_idx=[i for i,r in imported.iterrows() if _weak_unpriced(r)]
+            if drop_idx:
+                imported=imported.drop(index=drop_idx).reset_index(drop=True)
     imported, recovery_stats = title_recovery_and_multicard_v176(imported)
     # Re-dedupe in case a split card was also discovered independently elsewhere.
     imported = _dedupe_imported(imported.to_dict("records"))
