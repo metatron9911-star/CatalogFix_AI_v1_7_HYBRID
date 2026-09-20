@@ -1,0 +1,126 @@
+name: Appliances RapidOCR QA
+
+on:
+  push:
+    branches:
+      - qa/appliances-rapidocr-b863423a
+
+jobs:
+  appliances-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install frozen dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download exact Appliances PDF
+        run: |
+          curl -L --fail --retry 3 -o AppliancesPriceList-New.pdf https://carysil.com/wp-content/uploads/2025/06/AppliancesPriceList-New.pdf
+          sha256sum AppliancesPriceList-New.pdf
+          test "$(sha256sum AppliancesPriceList-New.pdf | awk '{print $1}')" = "64a8210a8bf2751041a9572221b645b54478c40283a4aa439f138c87de2fdf27"
+
+      - name: Run frozen RapidOCR pipeline
+        run: |
+          python - <<'PY'
+          import json, os, re, time
+          import pandas as pd
+          import catalogfix_core as c
+
+          pdf="AppliancesPriceList-New.pdf"
+          ck="qa_appliances_ckpt"
+          os.makedirs(ck, exist_ok=True)
+          t0=time.time()
+          with open(pdf,"rb") as f:
+              imported, report, meta = c.smart_import_pdf(
+                  f,
+                  filename=pdf,
+                  checkpoint_dir=ck,
+                  resume=False,
+                  return_meta=True,
+                  visual_ocr=True,
+                  ocr_dpi=180,
+                  chunk_size=100,
+              )
+          elapsed=time.time()-t0
+
+          imported.to_csv("appliances_imported.csv",index=False)
+          report.to_csv("appliances_report.csv",index=False)
+
+          qs=meta.get("quality_stats",{})
+          statuses=report.get("scan_status",pd.Series(dtype=str)).astype(str).tolist()
+          passes1=sum("passes1" in x for x in statuses)
+          passes2=sum("passes2" in x for x in statuses)
+          named=[]
+          for x in statuses:
+              m=re.search(r"named(\d+)",x)
+              named.append(int(m.group(1)) if m else 0)
+
+          skus=imported.get("sku",pd.Series(dtype=str)).astype(str)
+          methods=imported.get("import_method",pd.Series(dtype=str)).astype(str)
+          qflags=imported.get("quality_flags",pd.Series(dtype=str)).astype(str)
+          cats=imported.get("category",pd.Series(dtype=str)).astype(str)
+          vconf=pd.to_numeric(imported.get("visual_confidence",pd.Series(dtype=float)),errors="coerce")
+
+          checkpoints=["DW-01","FSCR01","BIO-01","MWO-1","CW-165","CW-46"]
+          checkpoint_rows={}
+          for code in checkpoints:
+              rows=imported[skus.eq(code)]
+              checkpoint_rows[code]=rows.to_dict("records")
+
+          railing_rows=imported[skus.str.contains("RAILING",case=False,na=False)].to_dict("records")
+          cand_mask=skus.str.startswith(("CAND-","VIS-P"),na=False)
+
+          summary={
+              "git_sha": os.environ.get("GITHUB_SHA"),
+              "release_version": c.RELEASE_VERSION,
+              "checkpoint_version": c.CHECKPOINT_VERSION,
+              "elapsed_seconds": elapsed,
+              "rows": len(imported),
+              "pages_reported": len(report),
+              "router_counts": meta.get("router_counts"),
+              "visual_pages": meta.get("visual_pages"),
+              "passes1_pages": passes1,
+              "passes2_pages": passes2,
+              "named_total": sum(named),
+              "named_pages_nonzero": sum(n>0 for n in named),
+              "quality_stats": qs,
+              "categories_inherited": qs.get("categories_inherited"),
+              "duplicates_removed": qs.get("duplicates_removed"),
+              "invariant_input_output_mismatch": qs.get("invariant_input_output_mismatch"),
+              "invariant_delta": qs.get("invariant_delta"),
+              "category_counts": cats.value_counts(dropna=False).to_dict(),
+              "checkpoint_rows": checkpoint_rows,
+              "railing_rows": railing_rows,
+              "candidate_count": int(cand_mask.sum()),
+              "candidate_methods": methods[cand_mask].value_counts().to_dict(),
+              "candidate_flags": qflags[cand_mask].value_counts().to_dict(),
+              "candidate_visual_confidence": {
+                  "min": None if vconf[cand_mask].dropna().empty else float(vconf[cand_mask].min()),
+                  "mean": None if vconf[cand_mask].dropna().empty else float(vconf[cand_mask].mean()),
+                  "max": None if vconf[cand_mask].dropna().empty else float(vconf[cand_mask].max()),
+              },
+              "scan_status": statuses,
+          }
+          with open("appliances_summary.json","w",encoding="utf-8") as fh:
+              json.dump(summary,fh,ensure_ascii=False,indent=2,default=str)
+
+          print(json.dumps(summary,ensure_ascii=False,indent=2,default=str))
+          PY
+
+      - name: Upload QA outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: appliances-rapidocr-b863423a
+          path: |
+            appliances_imported.csv
+            appliances_report.csv
+            appliances_summary.json
+          if-no-files-found: error
