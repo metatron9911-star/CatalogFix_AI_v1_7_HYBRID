@@ -2680,6 +2680,9 @@ def _clean_title_v17(title, sku, category, variant_group="", import_method="", d
     t=clean_text(title); vg=clean_text(variant_group); method=clean_text(import_method)
     desc=clean_text(description)
 
+    if method in {"standard-commercial-table","commercial-text-row","order-form-dual-price","vehicle-price-row"}:
+        return t or desc or vg or sku
+
     # Product-card variants: the family title is stronger evidence than a numeric title.
     if method == "product-card-variant":
         if vg and vg != sku and not _looks_like_marketing_copy(vg):
@@ -2784,6 +2787,9 @@ def _repair_title_v177(title, sku="", description="", variant_group="", method="
     vg=_sanitize_catalog_text_v177(variant_group)
     sku=clean_text(sku); method=clean_text(method)
 
+    if method in {"standard-commercial-table","commercial-text-row","order-form-dual-price","vehicle-price-row"}:
+        return t or desc or vg or sku
+
     # Variant family title is authoritative when sane.
     if method == "product-card-variant" and vg and not _title_sanity_flags_v177(vg, sku):
         t=vg
@@ -2823,7 +2829,11 @@ def text_sanity_repair_v177(imported):
                 if clean != cur:
                     df.at[i,col]=clean
         flags=[x.strip() for x in clean_text(df.at[i,"quality_flags"]).split(",") if x.strip()]
-        sanity=_title_sanity_flags_v177(df.at[i,"title"], sku)
+        if method in {"standard-commercial-table","commercial-text-row","order-form-dual-price","vehicle-price-row"}:
+            sanity=[f for f in _title_sanity_flags_v177(df.at[i,"title"], sku)
+                    if f in {"pdf_cid_glyphs","pdf_symbol_noise","title_empty_after_repair","repeated_title_phrase"}]
+        else:
+            sanity=_title_sanity_flags_v177(df.at[i,"title"], sku)
         if sanity:
             flagged += 1
             for f in sanity:
@@ -3456,9 +3466,13 @@ def process_canonical(imported):
             qconf = float(row.get("quality_confidence", "") or 0)
         except Exception:
             qconf = 0.0
-        gate_flags = {"weak_title", "promo_or_noise_title", "variant_sku_suspicious", "variant_name_missing", "title_boundary_suspect", "row_price_weak_title", "product_sku_suspicious", "multicard_split_review", "pdf_cid_glyphs", "pdf_symbol_noise", "title_symbol_ratio", "title_fragment", "foreign_sku_in_title", "title_too_long", "title_empty_after_repair", "residual_pdf_punct", "body_copy_spill", "size_inside_title", "fragrance_copy_spill", "repeated_title_phrase"}
+        gate_flags = {"weak_title", "promo_or_noise_title", "variant_sku_suspicious", "variant_name_missing", "title_boundary_suspect", "row_price_weak_title", "product_sku_suspicious", "multicard_split_review", "pdf_cid_glyphs", "pdf_symbol_noise", "title_symbol_ratio", "title_fragment", "foreign_sku_in_title", "title_too_long", "title_empty_after_repair", "residual_pdf_punct", "body_copy_spill", "size_inside_title", "fragrance_copy_spill", "repeated_title_phrase", "supplier_sku_missing"}
         present_flags = {x.strip() for x in qflags.split(",") if x.strip()}
-        sanity_now = set(_title_sanity_flags_v177(row.get("title", ""), sku))
+        if method in {"standard-commercial-table","commercial-text-row","order-form-dual-price","vehicle-price-row"}:
+            sanity_now = {x for x in _title_sanity_flags_v177(row.get("title", ""), sku)
+                          if x in {"pdf_cid_glyphs","pdf_symbol_noise","title_empty_after_repair","repeated_title_phrase"}}
+        else:
+            sanity_now = set(_title_sanity_flags_v177(row.get("title", ""), sku))
         present_flags.update(sanity_now)
         if qconf and qconf < 0.72:
             add_issue(index, sku, "Low quality confidence — verify product card", "quality_confidence", qconf, "Gate")
