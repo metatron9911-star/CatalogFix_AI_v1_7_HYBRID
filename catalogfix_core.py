@@ -1615,7 +1615,7 @@ def _visual_card_fallback(page_num, boxes, image_shape, existing_records, page_h
         })
     return out
 
-def extract_visual_catalog_products(doc, page_num, filename="", dpi=180):
+def extract_visual_catalog_products(doc, page_num, filename="", dpi=140):
     """v1.6 High Intelligence Scanner: multi-pass OCR + geometry-aware product association."""
     passes = []
     image, boxes, engine_name = _ocr_visual_pass(doc, page_num, dpi)
@@ -1625,7 +1625,7 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=180):
     first_codes = sum(len(_visual_codes_from_text(b.get("text", ""))) for b in boxes)
     avg_score = (sum(float(b.get("score",0) or 0) for b in boxes) / len(boxes)) if boxes else 0.0
     if first_codes == 0 or avg_score < 0.72:
-        hi_dpi = max(240, int(dpi * 1.35))
+        hi_dpi = max(190, int(dpi * 1.35))
         try:
             image2, boxes2, engine2 = _ocr_visual_pass(doc, page_num, hi_dpi)
             passes.append((hi_dpi, image2, boxes2, engine2))
@@ -1702,6 +1702,8 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=180):
         "visual_products": len(records), "router_type": "VISUAL_ADAPTIVE",
         "scan_status": f"adaptive-high-intelligence-{engine_name}-passes{len(passes)}-cards{len(card_records)}",
     }
+    # Drop large raster references before moving to the next page.
+    passes.clear()
     return records, report
 
 
@@ -1718,9 +1720,9 @@ _TECH_DOC_HINTS = (
     "修订历史记录", "机械、封装和可订购信息", "封装和可订购信息",
 )
 _COMMERCIAL_PRICE_HINTS = (
-    "price", "prices", "price/pcs", "unit price", "retail price", "wholesale price",
+    "price/pcs", "unit price", "retail price", "wholesale price",
     "catalogue price", "recommended catalogue price", "sale price", "surcharge",
-    "цена", "цены", "стоимость", "розничная цена", "оптовая цена",
+    "розничная цена", "оптовая цена",
     "eur", "usd", "gbp", "pln", "uah", "руб", "₽", "€", "$", "zł",
 )
 
@@ -1732,9 +1734,13 @@ def _document_type_safety_v18(page_texts):
     joined="\n".join(texts).lower()
     tech_hits=sum(1 for h in _TECH_DOC_HINTS if h.lower() in joined)
     commercial_hits=sum(1 for h in _COMMERCIAL_PRICE_HINTS if h.lower() in joined)
-    # Strong vendor-datasheet structure: several engineering sections and no genuine price language.
-    # "orderable" alone is not commercial pricing and must not defeat the guard.
-    if tech_hits >= 4 and commercial_hits == 0:
+    explicit_money = bool(re.search(
+        r"(?:[$€₽]|\b(?:usd|eur|gbp|pln|uah)\b)\s*\d|\d\s*(?:[$€₽]|\b(?:usd|eur|gbp|pln|uah)\b)",
+        joined, re.I
+    ))
+    commercial_evidence = commercial_hits + (2 if explicit_money else 0)
+    # Generic legal phrases such as "purchase price" must not turn a datasheet into a catalogue.
+    if tech_hits >= 4 and commercial_evidence == 0:
         return {"type":"technical-datasheet","technical_hits":tech_hits,"commercial_hits":commercial_hits}
     return {"type":"catalog-or-unknown","technical_hits":tech_hits,"commercial_hits":commercial_hits}
 
