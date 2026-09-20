@@ -3679,6 +3679,7 @@ def smart_import_pdf(
                         "sku":clean_text(imported.at[i,"sku"]) if "sku" in imported.columns else "",
                         "title":clean_text(imported.at[i,"title"]) if "title" in imported.columns else "",
                         "import_method":clean_text(imported.at[i,"import_method"]) if "import_method" in imported.columns else "",
+                        "price":imported.at[i,"price"] if "price" in imported.columns else "",
                         "source_row":imported.at[i,"source_row"] if "source_row" in imported.columns else "",
                     }
                     for i in drop_idx
