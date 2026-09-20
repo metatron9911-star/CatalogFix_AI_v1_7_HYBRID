@@ -59,3 +59,6 @@ The current release includes adaptive visual OCR, structured commercial table an
 Processing time depends primarily on PDF page count and whether OCR is required. Image-heavy PDFs may trigger a second OCR pass on pages where the first pass does not provide enough commercial signal.
 
 CatalogFix does not promise perfect extraction. It makes uncertainty explicit and keeps ambiguous rows out of Ready.
+
+
+Deployment source: GitHub main branch.
