@@ -3645,7 +3645,7 @@ def smart_import_pdf(
             def _weak_unpriced(r):
                 if clean_text(r.get("import_method","")) not in weak_methods:
                     return False
-                p=parse_price(r.get("price",""))
+                p=_parse_price_v183(r.get("price",""))
                 if not pd.isna(p):
                     return False
                 title=clean_text(r.get("title",""))
