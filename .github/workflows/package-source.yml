@@ -34,10 +34,15 @@ jobs:
       - name: Ruff undefined-name check
         run: |
           python -m pip install ruff
-          ruff check catalogfix_core.py app.py smoke_test.py --select F821,F401,F811
+          ruff check catalogfix_core.py app.py actor_main.py smoke_test.py --select F821,F401,F811
 
       - name: Smoke test
-        run: python smoke_test.py
+        run: |
+          python -m py_compile actor_main.py
+          python -m json.tool .actor/actor.json > /dev/null
+          python -m json.tool .actor/input_schema.json > /dev/null
+          python -m json.tool .actor/output_schema.json > /dev/null
+          python smoke_test.py
 
       - name: Prepare package folder
         run: |
