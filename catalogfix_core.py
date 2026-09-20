@@ -1722,6 +1722,11 @@ _COMMERCIAL_PRICE_HINTS = (
     "eur", "usd", "gbp", "pln", "uah", "руб", "₽", "€", "$", "zł",
 )
 
+_STATISTICAL_REPORT_HINTS = (
+    "price and purity", "street purity", "wholesale purity",
+    "drug group", "drug type", "purity type", "source",
+)
+
 def _document_type_safety_v18(page_texts):
     """Return a conservative document classification from fast extracted text."""
     texts=[clean_text(x) for x in (page_texts or []) if clean_text(x)]
@@ -1735,10 +1740,13 @@ def _document_type_safety_v18(page_texts):
         joined, re.I
     ))
     commercial_evidence = commercial_hits + (2 if explicit_money else 0)
+    stat_hits=sum(1 for h in _STATISTICAL_REPORT_HINTS if h.lower() in joined)
+    if stat_hits >= 4 and "price and purity" in joined:
+        return {"type":"statistical-report","technical_hits":tech_hits,"commercial_hits":commercial_hits,"statistical_hits":stat_hits}
     # Generic legal phrases such as "purchase price" must not turn a datasheet into a catalogue.
     if tech_hits >= 4 and commercial_evidence == 0:
         return {"type":"technical-datasheet","technical_hits":tech_hits,"commercial_hits":commercial_hits}
-    return {"type":"catalog-or-unknown","technical_hits":tech_hits,"commercial_hits":commercial_hits}
+    return {"type":"catalog-or-unknown","technical_hits":tech_hits,"commercial_hits":commercial_hits,"statistical_hits":stat_hits}
 
 def classify_pdf_page_text(text):
     """Cheap routing decision used before heavy parsing."""
@@ -2187,7 +2195,7 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
     return records
 
 
-# v1.8.1 Order-form / dual-price catalogue parser
+# v1.8.9 Order-form / dual-price catalogue parser
 def _looks_like_item_code_v181(value):
     t=clean_text(value)
     if not t or len(t)>24: return False
@@ -3239,25 +3247,20 @@ def smart_import_pdf(
         except Exception:
             sample_texts.append("")
     doc_safety=_document_type_safety_v18(sample_texts)
-    if doc_safety.get("type") == "technical-datasheet":
+    if doc_safety.get("type") in {"technical-datasheet","statistical-report"}:
+        dtype=doc_safety.get("type")
+        router="TECHNICAL_DATASHEET" if dtype=="technical-datasheet" else "STATISTICAL_REPORT"
         report=pd.DataFrame([{
             "sheet":"DOCUMENT","source_rows":0,"source_columns":0,
             "matrix_products":0,"dimension_products":0,"row_price_products":0,
             "header_products":0,"pattern_products":0,"product_card_products":0,
-            "visual_products":0,"router_type":"TECHNICAL_DATASHEET",
-            "scan_status":"skipped-technical-datasheet"
+            "visual_products":0,"router_type":router,"scan_status":f"skipped-{dtype}"
         }])
         meta={
-            "job_id":_checkpoint_job_id(data, filename),
-            "checkpoint_folder":"",
-            "chunk_size":chunk_size,
-            "total_pages":total_pages,
-            "candidate_pages":0,
-            "visual_pages":0,
-            "structured_pages":0,
-            "resumed_chunks":0,
-            "document_type":"technical-datasheet",
-            "document_safety":doc_safety,
+            "job_id":_checkpoint_job_id(data, filename),"checkpoint_folder":"",
+            "chunk_size":chunk_size,"total_pages":total_pages,"candidate_pages":0,
+            "visual_pages":0,"structured_pages":0,"resumed_chunks":0,
+            "document_type":dtype,"document_safety":doc_safety,
             "quality_stats":{"input_rows":0,"output_rows":0,"duplicates_removed":0},
         }
         empty=_dedupe_imported([])
@@ -3267,11 +3270,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.1"
+        and str(manifest.get("version", "")) == "1.8.9"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.1", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.9", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3347,7 +3350,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.1", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.9", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
