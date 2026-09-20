@@ -1,0 +1,106 @@
+name: Appliances OCR Diagnostic
+
+on:
+  push:
+    branches:
+      - qa/appliances-rapidocr-b863423a
+
+jobs:
+  diagnose-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install frozen dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download exact Appliances PDF
+        run: |
+          curl -L --fail --retry 3 -o AppliancesPriceList-New.pdf https://carysil.com/wp-content/uploads/2025/06/AppliancesPriceList-New.pdf
+          test "$(sha256sum AppliancesPriceList-New.pdf | awk '{print $1}')" = "64a8210a8bf2751041a9572221b645b54478c40283a4aa439f138c87de2fdf27"
+
+      - name: Dump raw OCR boxes for DW-01 and MWO-1 pages
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import pandas as pd
+          from PIL import Image
+          import fitz
+          import catalogfix_core as c
+
+          out=Path("appliances_ocr_diag")
+          out.mkdir(exist_ok=True)
+
+          # Visual ground truth from the contact sheets:
+          # p18 contains DW-01; p22 contains MWO-1.
+          targets={18:"DW-01",22:"MWO-1"}
+          dpis=(180,220,300)
+
+          doc=fitz.open("AppliancesPriceList-New.pdf")
+          summary={}
+          for page_num, expected in targets.items():
+              page_summary={"expected":expected,"runs":{}}
+              for dpi in dpis:
+                  img=c._render_pdf_page_for_ocr(doc,page_num,dpi=dpi)
+                  if dpi==300:
+                      Image.fromarray(img).save(out/f"p{page_num:02d}_300dpi.png")
+                  boxes,engine=c._ocr_boxes(img)
+                  rows=[]
+                  for i,b in enumerate(boxes):
+                      text=str(b.get("text",""))
+                      score=float(b.get("score",0.0))
+                      bbox=list(b.get("bbox",()))
+                      rows.append({"index":i,"text":text,"score":score,"bbox":json.dumps(bbox)})
+                  pd.DataFrame(rows).to_csv(out/f"p{page_num:02d}_{dpi}dpi_all_boxes.csv",index=False)
+
+                  low=[r for r in rows if 0.15 <= r["score"] <= 0.45]
+                  pd.DataFrame(low).to_csv(out/f"p{page_num:02d}_{dpi}dpi_score_015_045.csv",index=False)
+
+                  # Diagnostic only: show what frozen code would extract/clean from every raw box.
+                  transformed=[]
+                  for r in rows:
+                      codes=c._visual_codes_from_text(r["text"])
+                      for code in codes:
+                          transformed.append({
+                              "raw_text":r["text"],
+                              "score":r["score"],
+                              "candidate":code,
+                              "cleaned":c._clean_visual_code(code),
+                          })
+                  pd.DataFrame(transformed).to_csv(out/f"p{page_num:02d}_{dpi}dpi_code_transform.csv",index=False)
+
+                  norm_expected=expected.upper().replace(" ","")
+                  near=[]
+                  for r in rows:
+                      compact=r["text"].upper().replace(" ","")
+                      if any(tok in compact for tok in [norm_expected, norm_expected.replace("-",""), expected.split("-")[0]]):
+                          near.append(r)
+
+                  page_summary["runs"][str(dpi)]={
+                      "engine":engine,
+                      "box_count":len(rows),
+                      "low_015_045_count":len(low),
+                      "near_expected":near,
+                      "code_transform_count":len(transformed),
+                  }
+              summary[str(page_num)]=page_summary
+
+          doc.close()
+          with open(out/"summary.json","w",encoding="utf-8") as f:
+              json.dump(summary,f,ensure_ascii=False,indent=2)
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+
+      - name: Upload diagnostic dump
+        uses: actions/upload-artifact@v4
+        with:
+          name: appliances-ocr-diagnostic
+          path: appliances_ocr_diag/
+          if-no-files-found: error
