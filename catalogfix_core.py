@@ -1307,12 +1307,18 @@ _GENERIC_VISUAL_HEADINGS = {
 }
 
 def _clean_visual_code(value):
-    text = clean_text(value).upper().replace("_", "-")
-    text = re.sub(r"\s+", "", text)
-    # Preserve a single supplier hyphen, e.g. FR-030 / AC-032.
-    m = re.match(r"^([A-Z]{1,5})-?(\d{2,6}[A-Z]?)$", text)
+    raw = clean_text(value).upper().replace("_", "-")
+    had_separator = bool(re.search(r"[\s-]", raw))
+    text = re.sub(r"\s+", "", raw)
+    # Supplier codes are usually PREFIX + digits. One-digit codes are accepted only
+    # when the source visibly separates prefix and number (e.g. MWO-1), which keeps
+    # ordinary words ending in a digit from becoming SKUs.
+    m = re.match(r"^([A-Z]{1,5})-?(\d{1,6}[A-Z]?)$", text)
     if m:
         prefix, digits = m.groups()
+        numeric_part = re.match(r"(\d+)", digits).group(1)
+        if len(numeric_part) == 1 and not had_separator:
+            return ""
         if prefix in _FALSE_CODE_PREFIXES:
             return ""
         # Common OCR confusion in visual catalogs: zero is read as the letter O,
@@ -1320,7 +1326,6 @@ def _clean_visual_code(value):
         if re.fullmatch(r"B[O0]{1,3}", prefix) and re.fullmatch(r"\d{1,5}[A-Z]?", digits):
             zeros = len(prefix) - 1
             core = ("0" * zeros) + digits
-            # Most B-family codes in visual catalogs use four numeric positions.
             numeric = re.match(r"(\d+)([A-Z]?)$", core)
             if numeric:
                 nums, suffix = numeric.groups()
