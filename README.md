@@ -1,4 +1,4 @@
-# CatalogFix AI v1.8.11 — Hybrid Quality Intelligence
+# CatalogFix AI v1.8.12 — Hybrid Quality Intelligence
 
 CatalogFix converts supplier CSV, Excel and PDF catalogues into a normalized product master, QA report, and safe Shopify-ready export.
 
@@ -38,3 +38,7 @@ The included `railway.toml` starts Streamlit on Railway's `$PORT`.
 - Shopify Ready
 - Needs Review
 - Import Report
+
+
+## Document-level safety gate
+The safety gate is heuristic and document-scoped. If a representative sample looks like a technical datasheet or statistical report, CatalogFix performs a second lightweight page-by-page commercial-signal probe before rejecting the whole file. This is designed to preserve hybrid PDFs that contain a genuine price list somewhere outside the initial sample.
