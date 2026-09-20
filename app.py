@@ -14,8 +14,8 @@ from catalogfix_core import (
     to_excel_bytes,
 )
 
-st.set_page_config(page_title="CatalogFix AI v1.8.9.9", page_icon="🧹", layout="wide")
-st.title("CatalogFix AI v1.8.9.9")
+st.set_page_config(page_title="CatalogFix AI v1.8.10", page_icon="🧹", layout="wide")
+st.title("CatalogFix AI v1.8.10")
 st.caption("Hybrid Quality Intelligence: universal routing + visual layout intelligence + context memory + dedupe + sanity checks + QA")
 
 st.info("Hybrid Quality Intelligence is ON: universal page routing + multi-pass visual OCR + page-context category memory + conservative dimension sanity checks + visual duplicate suppression + confidence/QA. Large PDFs autosave and resume after interruption.")
@@ -172,14 +172,14 @@ excel_result = to_excel_bytes(cleaned, issues, shop_ready, needs_review, import_
 st.download_button(
     "Download full result (.xlsx)",
     excel_result,
-    file_name="CatalogFix_Result_v1_8_9.xlsx",
+    file_name="CatalogFix_Result_v1_8_10.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
 st.download_button(
     "Download safe Shopify-ready CSV",
     shop_ready.to_csv(index=False).encode("utf-8-sig"),
-    file_name="Shopify_Ready_v1_8_9.csv",
+    file_name="Shopify_Ready_v1_8_10.csv",
     mime="text/csv",
     disabled=shop_ready.empty,
 )
