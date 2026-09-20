@@ -1704,6 +1704,40 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=180):
     }
     return records, report
 
+
+# v1.8 Document-Type Safety Gate
+# CatalogFix is a commercial-catalog extractor. Technical datasheets/manuals contain
+# thousands of numeric measurements that must never be mistaken for prices or SKUs.
+_TECH_DOC_HINTS = (
+    "absolute maximum ratings", "electrical characteristics", "typical characteristics",
+    "pin configuration", "pin functions", "package option addendum", "package materials information",
+    "package outline", "example board layout", "example stencil design", "revision history",
+    "thermal information", "recommended operating conditions", "application information",
+    "mechanical, packaging, and orderable information",
+    "绝对最大额定值", "电气特性", "典型特性", "引脚配置", "引脚功能", "封装热阻",
+    "修订历史记录", "机械、封装和可订购信息", "封装和可订购信息",
+)
+_COMMERCIAL_PRICE_HINTS = (
+    "price", "prices", "price/pcs", "unit price", "retail price", "wholesale price",
+    "catalogue price", "recommended catalogue price", "sale price", "surcharge",
+    "цена", "цены", "стоимость", "розничная цена", "оптовая цена",
+    "eur", "usd", "gbp", "pln", "uah", "руб", "₽", "€", "$", "zł",
+)
+
+def _document_type_safety_v18(page_texts):
+    """Return a conservative document classification from fast extracted text."""
+    texts=[clean_text(x) for x in (page_texts or []) if clean_text(x)]
+    if not texts:
+        return {"type":"unknown","technical_hits":0,"commercial_hits":0}
+    joined="\n".join(texts).lower()
+    tech_hits=sum(1 for h in _TECH_DOC_HINTS if h.lower() in joined)
+    commercial_hits=sum(1 for h in _COMMERCIAL_PRICE_HINTS if h.lower() in joined)
+    # Strong vendor-datasheet structure: several engineering sections and no genuine price language.
+    # "orderable" alone is not commercial pricing and must not defeat the guard.
+    if tech_hits >= 4 and commercial_hits == 0:
+        return {"type":"technical-datasheet","technical_hits":tech_hits,"commercial_hits":commercial_hits}
+    return {"type":"catalog-or-unknown","technical_hits":tech_hits,"commercial_hits":commercial_hits}
+
 def classify_pdf_page_text(text):
     """Cheap routing decision used before heavy parsing."""
     t = clean_text(text)
@@ -2846,16 +2880,54 @@ def smart_import_pdf(
 
     fast_reader = PdfReader(io.BytesIO(data))
     total_pages = len(fast_reader.pages)
+
+    # v1.8 whole-document safety gate. Inspect a representative sample before any
+    # price heuristics run so engineering graphs/spec tables cannot become products.
+    sample_indexes = sorted(set(
+        list(range(min(total_pages, 8))) +
+        list(range(max(0, total_pages-5), total_pages)) +
+        ([total_pages//2] if total_pages else [])
+    ))
+    sample_texts=[]
+    for idx in sample_indexes:
+        try:
+            sample_texts.append(fast_reader.pages[idx].extract_text() or "")
+        except Exception:
+            sample_texts.append("")
+    doc_safety=_document_type_safety_v18(sample_texts)
+    if doc_safety.get("type") == "technical-datasheet":
+        report=pd.DataFrame([{
+            "sheet":"DOCUMENT","source_rows":0,"source_columns":0,
+            "matrix_products":0,"dimension_products":0,"row_price_products":0,
+            "header_products":0,"pattern_products":0,"product_card_products":0,
+            "visual_products":0,"router_type":"TECHNICAL_DATASHEET",
+            "scan_status":"skipped-technical-datasheet"
+        }])
+        meta={
+            "job_id":_checkpoint_job_id(data, filename),
+            "checkpoint_folder":"",
+            "chunk_size":chunk_size,
+            "total_pages":total_pages,
+            "candidate_pages":0,
+            "visual_pages":0,
+            "structured_pages":0,
+            "resumed_chunks":0,
+            "document_type":"technical-datasheet",
+            "document_safety":doc_safety,
+            "quality_stats":{"input_rows":0,"output_rows":0,"duplicates_removed":0},
+        }
+        empty=_dedupe_imported([])
+        return (empty, report, meta) if return_meta else (empty, report)
     manifest = _load_json(manifest_path, {}) if resume else {}
     valid_manifest = (
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.7.9"
+        and str(manifest.get("version", "")) == "1.8.0"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.7.9", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.0", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -2931,7 +3003,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.7.9", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.0", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
