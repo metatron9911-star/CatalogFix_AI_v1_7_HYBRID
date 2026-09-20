@@ -1,31 +1,40 @@
-# CatalogFix AI v1.7 — Hybrid Quality Intelligence
+# CatalogFix AI v1.8.11 — Hybrid Quality Intelligence
 
-Local Streamlit build for supplier CSV / Excel / PDF catalogs.
+CatalogFix converts supplier CSV, Excel and PDF catalogues into a normalized product master, QA report, and safe Shopify-ready export.
 
-## v1.7 quality layer
-- Universal page router: structured tables, price matrices, text-product pages, visual/image-heavy pages.
-- Adaptive multi-pass OCR and visual-card fallback.
-- Cross-page category context memory: specific category headings can be inherited by nearby continuation pages.
-- Strict title cleanup: marketing prose is not used as a product title when a safer label/category is available.
-- Quality Duplicate Killer for overlapping/repeated generated visual cards.
-- Conservative dimension sanity checks with original/suggested values retained.
-- Quality confidence + quality flags on every imported row.
-- RAL/NCS protection: colour codes are not treated as supplier SKU.
-- Missing supplier SKU or price is never invented; uncertain candidates stay review-only.
-- Chunk autosave/resume for large PDFs. No artificial page-count limit.
+## Core routing
+- Universal PDF router: `VISUAL`, `STRUCTURED_PRICE`, `TEXT_PRODUCT`, `TEXT_OTHER`.
+- Adaptive multi-pass OCR for image-heavy catalogues.
+- Structured parsers for standard SKU/description/price tables, dual-price order forms, vehicle multi-price lists, tiered service tables, matrices, and brochure-style price cards.
+- Technical datasheets and statistical price reports are safety-gated to 0 product rows instead of generating false products.
 
-## Start on Windows
-Double-click `START_WINDOWS_CMD.bat`.
+## Quality Intelligence
+- Cross-page category context memory.
+- Conservative title repair and PDF text sanity checks.
+- Duplicate suppression across structured and visual candidates.
+- Dimension sanity checks with original/suggested values retained.
+- RAL/NCS protection.
+- `quality_confidence`, `quality_flags`, `visual_confidence`, and `router_type` retained for auditability.
+- Missing supplier SKU or price is never silently invented. Review-only rows use internal `CAND-...` identifiers and carry `supplier_sku_missing`.
 
-Then open the local Streamlit URL if the browser does not open automatically.
+## Price provenance
+When a source exposes more than one price, the chosen export price is explicit and alternate source prices are preserved in `attributes_json`. Examples include:
+- IMSAI `kit_price` + `assembled_price`;
+- vehicle `basic_price`, VAT, retail and OTR fields;
+- regional/service price tiers.
 
-## Control test
-For the same visual PDF used with v1.6.1, compare:
-1. total candidates before/after quality pass;
-2. duplicates removed;
-3. inherited categories;
-4. generic `Visual Catalog` count;
-5. corrected dimensions;
-6. weak-title / missing-supplier-SKU flags.
+## Image-only PDFs
+PDFs without a usable text layer route to visual OCR when PyMuPDF/OCR dependencies are available. If visual OCR is unavailable, the import report records `visual-ocr-unavailable` rather than raising an exception.
 
-The goal is quality, not artificially increasing the number of rows.
+## Large PDFs
+CatalogFix writes resumable gzip checkpoints and a versioned `manifest.json`. Checkpoints are intentionally invalidated when the processing version changes, so quality-rule changes trigger a clean rescan.
+
+## Railway
+The included `railway.toml` starts Streamlit on Railway's `$PORT`.
+
+## Output
+- Clean Master
+- Issues Found
+- Shopify Ready
+- Needs Review
+- Import Report
