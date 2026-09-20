@@ -25,6 +25,35 @@ except Exception as exc:
     print(f"IMPORT FAIL: {type(exc).__name__}: {exc}")
     sys.exit(1)
 
+# Visual SKU prefilter/normalization regression: explicit separators may contain
+# OCR spacing and one-digit suffixes are allowed only with an explicit '-'/'_'.
+try:
+    visual_positive = {
+        "DW - 01": "DW-01",
+        "DW-02": "DW-02",
+        "DW - 03": "DW-03",
+        "DW_04": "DW-04",
+        "MWO-1": "MWO-1",
+        "MWO-2": "MWO-2",
+        "FSCR01": "FSCR01",
+        "FSCR 01": "FSCR01",
+        "BIO-01": "BIO-01",
+        "CW 165": "CW-165",
+        "CW 46": "CW-46",
+    }
+    for raw, expected in visual_positive.items():
+        got = catalogfix_core._visual_codes_from_text(raw)
+        if expected not in got:
+            raise AssertionError(f"VISUAL SKU REGRESSION: {raw!r} -> {got}, expected {expected!r}")
+
+    for raw in ("MODEL1", "the 12", "ITEM 01", "FIG 3", "PAGE 12", "RAILING"):
+        got = catalogfix_core._visual_codes_from_text(raw)
+        if got:
+            raise AssertionError(f"VISUAL SKU NEGATIVE REGRESSION: {raw!r} -> {got}")
+except Exception as exc:
+    print(f"VISUAL SKU REGRESSION FAIL: {type(exc).__name__}: {exc}")
+    sys.exit(1)
+
 # Text/no-OCR route: exercises checkpoint setup, routing and return_meta plumbing.
 try:
     writer = PdfWriter()
