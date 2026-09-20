@@ -3654,7 +3654,13 @@ def smart_import_pdf(
                 very_short=(len(title) <= 3 or len(title.split()) <= 1)
                 noise_word=(norm_header(title) in _BAD_ITEM_WORDS_V181 or norm_header(sku) in _BAD_ITEM_WORDS_V181)
                 same_title=bool(title and sku and title == sku)
-                return (not title) or same_title or very_short or noise_word
+                prose_fragment_sku=bool(
+                    len(sku) > 8
+                    and re.fullmatch(r"[A-Za-z0-9]+", sku)
+                    and re.search(r"[A-Za-z]", sku)
+                    and re.search(r"\d", sku)
+                )
+                return (not title) or same_title or very_short or noise_word or prose_fragment_sku
             drop_idx=[i for i,r in imported.iterrows() if _weak_unpriced(r)]
             if drop_idx:
                 suppression_stats["weak_heuristic_rows_suppressed"]=len(drop_idx)
