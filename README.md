@@ -42,3 +42,10 @@ The included `railway.toml` starts Streamlit on Railway's `$PORT`.
 
 ## Document-level safety gate
 The safety gate is heuristic and document-scoped. If a representative sample looks like a technical datasheet or statistical report, CatalogFix performs a second lightweight page-by-page commercial-signal probe before rejecting the whole file. This is designed to preserve hybrid PDFs that contain a genuine price list somewhere outside the initial sample.
+
+
+## Full-document commercial probe
+When the representative sample looks like a technical datasheet or statistical report, CatalogFix performs a lightweight page-by-page text probe for commercial markers. The probe does not retain page text in memory and stops immediately at the first genuine commercial signal. If no commercial signal is found anywhere in the document, the whole file is rejected before OCR/product extraction.
+
+## Checkpoint compatibility
+Checkpoint manifests are version-gated. Checkpoints created by v1.8.11 are intentionally not reused by v1.8.12 or later; the first run after a processing-version change performs a clean rescan. Resume/reproducibility should therefore be validated with two runs of the same version.
