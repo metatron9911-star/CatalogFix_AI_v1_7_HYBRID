@@ -50,8 +50,8 @@ jobs:
           cp railway.toml CatalogFix_AI_v1_8_15/
           cp .gitignore CatalogFix_AI_v1_8_15/
           [ -f demo_messy_catalog.csv ] && cp demo_messy_catalog.csv CatalogFix_AI_v1_8_15/ || true
-          RELEASE_VERSION=$(PYTHONWARNINGS=ignore python -c "import catalogfix_core; print(catalogfix_core.RELEASE_VERSION)")
-          CHECKPOINT_VERSION=$(PYTHONWARNINGS=ignore python -c "import catalogfix_core; print(catalogfix_core.CHECKPOINT_VERSION)")
+          RELEASE_VERSION=$(python -c "import contextlib,sys; f=open('/dev/null','w'); ctx=contextlib.redirect_stderr(f); ctx.__enter__(); import catalogfix_core; print(catalogfix_core.RELEASE_VERSION); ctx.__exit__(None,None,None); f.close()")
+          CHECKPOINT_VERSION=$(python -c "import contextlib,sys; f=open('/dev/null','w'); ctx=contextlib.redirect_stderr(f); ctx.__enter__(); import catalogfix_core; print(catalogfix_core.CHECKPOINT_VERSION); ctx.__exit__(None,None,None); f.close()")
           {
             echo "GIT_SHA=$GITHUB_SHA"
             echo "RELEASE_VERSION=$RELEASE_VERSION"
