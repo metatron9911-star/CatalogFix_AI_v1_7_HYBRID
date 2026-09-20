@@ -2190,6 +2190,159 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
 
     return records
 
+
+# v1.8.1 Order-form / dual-price catalogue parser
+def _looks_like_item_code_v181(value):
+    t=clean_text(value)
+    if not t or len(t)>24: return False
+    if not re.search(r"[A-Za-z0-9]", t): return False
+    if re.search(r"\b(?:price|description|qty|total|handling|tax|terms)\b", t, re.I): return False
+    # Require a compact catalogue identifier, not prose.
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ./\-]{0,22}", t)) and len(t.split())<=4)
+
+def extract_order_form_products_v181(page, page_text, source_name, filename="", page_num=None):
+    """Parse catalogue/order-form pages with ITEM NO + DESCRIPTION + KIT/ASSEMBLED prices.
+
+    Uses word coordinates to avoid PDF text-layer column interleaving. When both kit
+    and assembled prices exist, the assembled price is exported and both source prices
+    are retained in attributes_json for auditability.
+    """
+    t=clean_text(page_text)
+    low=t.lower()
+    if not ("item no" in low and "description" in low and ("assembled" in low or "kit" in low) and "price" in low):
+        return []
+    try:
+        words=page.extract_words(x_tolerance=1.5, y_tolerance=2.5, keep_blank_chars=False)
+    except Exception:
+        return []
+    if not words:
+        return []
+    width=float(page.width or 612.0)
+    # Find the table header to calibrate columns.
+    header_words=[w for w in words if str(w.get("text","")).lower().startswith(("item","description","kit","assembled"))]
+    if not header_words:
+        return []
+    # Robust relative zones work across scanned US-letter/A4 order forms.
+    item_x0,item_x1=0.20*width,0.34*width
+    desc_x0,desc_x1=0.34*width,0.78*width
+    kit_x0,kit_x1=0.78*width,0.87*width
+    asm_x0=0.87*width
+
+    # Group words into visual rows.
+    rows=[]
+    for w in sorted(words, key=lambda z:(float(z.get("top",0)), float(z.get("x0",0)))):
+        y=float(w.get("top",0))
+        target=None
+        for r in rows[-3:]:
+            if abs(r["y"]-y)<=4.0:
+                target=r; break
+        if target is None:
+            target={"y":y,"words":[]}; rows.append(target)
+        target["words"].append(w)
+
+    category=""
+    brand=""
+    if re.search(r"\bIMSAI\b", t, re.I): brand="IMSAI"
+    records=[]
+    pending=None
+
+    def _row_text(ws,x0,x1=None):
+        vals=[]
+        for w in sorted(ws,key=lambda z:float(z.get("x0",0))):
+            x=float(w.get("x0",0))
+            if x>=x0 and (x1 is None or x<x1):
+                vals.append(str(w.get("text","")))
+        return clean_text(" ".join(vals))
+
+    def _money(ws,x0,x1=None):
+        txt=_row_text(ws,x0,x1)
+        nums=re.findall(r"\$?\s*(\d{1,6}(?:\.\d{1,2})?)", txt)
+        if not nums: return None
+        try: return float(nums[-1])
+        except Exception: return None
+
+    for r in rows:
+        ws=r["words"]
+        whole=_row_text(ws,0,None)
+        if not whole: continue
+        n=norm_header(whole)
+        # Category rows are short uppercase lines centered around item/description region.
+        if re.fullmatch(r"[A-Z0-9 /&\-]{4,45}", whole) and not re.search(r"\$", whole) and            not any(k in n for k in ["item no","description","price","qty","total","terms"]):
+            # Only accept obvious section headings.
+            if any(k in n for k in ["computer","memory","expansion","boards","modules","peripherals","controllers","miscellaneous","books","shared memory"]):
+                category=whole.title()
+                continue
+
+        item=_row_text(ws,item_x0,item_x1)
+        desc=_row_text(ws,desc_x0,desc_x1)
+        kit=_money(ws,kit_x0,kit_x1)
+        assembled=_money(ws,asm_x0,None)
+
+        # OCR/PDF extraction may put a currency symbol at the end of description.
+        desc=re.sub(r"[.$•·]+\s*$","",desc).strip()
+        if item and _looks_like_item_code_v181(item) and desc and len(desc)>=3:
+            # Flush previous buffered item.
+            if pending:
+                records.append(pending)
+            price=assembled if assembled is not None else kit
+            attrs={"kit_price":kit,"assembled_price":assembled,"selected_price":"assembled" if assembled is not None else "kit"}
+            pending={
+                "sku":re.sub(r"\s+","-",item.upper()).strip("-"),
+                "title":desc,
+                "brand":brand,
+                "price":price,
+                "category":category or "Catalog",
+                "size":"",
+                "color":"",
+                "description":desc,
+                "barcode":"",
+                "source_sheet":source_name,
+                "source_row":int(round(r["y"])),
+                "supplier_code":item,
+                "import_confidence":"HIGH" if price is not None else "MEDIUM",
+                "import_method":"order-form-dual-price",
+                "source_page":page_num or "",
+                "source_table":"coordinate-order-form",
+                "matrix_series":category or "Catalog",
+                "matrix_section":"Order form",
+                "matrix_model":"",
+                "variant_group":item,
+                "variant_codes":item,
+                "currency":"USD" if "$" in whole or "$" in t else "",
+                "vat_note":"",
+                "attributes_json":json.dumps(attrs,ensure_ascii=False),
+                "quality_confidence":0.96 if price is not None else 0.76,
+                "quality_flags":"" if price is not None else "missing_price",
+                "category_source":"order-form-heading",
+            }
+            continue
+
+        # Wrapped descriptions/prices belong to the previous item, never become standalone products.
+        if pending:
+            if desc and not re.search(r"\b(?:terms|prices|handling|tax|total)\b", desc, re.I):
+                if len(pending["description"])<180:
+                    pending["description"]=clean_text(pending["description"]+" "+desc)
+            if pending["price"] is None and (assembled is not None or kit is not None):
+                pending["price"]=assembled if assembled is not None else kit
+                try:
+                    attrs=json.loads(pending["attributes_json"])
+                except Exception:
+                    attrs={}
+                if kit is not None: attrs["kit_price"]=kit
+                if assembled is not None: attrs["assembled_price"]=assembled
+                attrs["selected_price"]="assembled" if assembled is not None else "kit"
+                pending["attributes_json"]=json.dumps(attrs,ensure_ascii=False)
+                pending["import_confidence"]="HIGH"
+                pending["quality_confidence"]=0.96
+                pending["quality_flags"]=""
+
+    if pending:
+        records.append(pending)
+
+    # Require a meaningful table, otherwise fall back to generic parsers.
+    good=[r for r in records if r.get("price") is not None and _looks_like_item_code_v181(r.get("supplier_code",""))]
+    return records if len(good)>=3 else []
+
 def _parse_pdf_page_v13(page, page_num, page_text, filename=""):
     """Parse one PDF page using the v1.3 detection stack."""
     page_name = f"PDF p.{page_num}"
@@ -2197,6 +2350,16 @@ def _parse_pdf_page_v13(page, page_num, page_text, filename=""):
     header_count = pattern_count = matrix_count = dimension_count = row_count = 0
     source_rows = source_columns = 0
     records = []
+
+    order_records = extract_order_form_products_v181(page, page_text, page_name, filename=filename, page_num=page_num)
+    if order_records:
+        records.extend(order_records)
+        return records, {
+            "sheet": page_name, "source_rows": len(order_records), "source_columns": 0,
+            "matrix_products": 0, "dimension_products": 0, "row_price_products": len(order_records),
+            "header_products": 0, "pattern_products": 0, "product_card_products": 0,
+            "scan_status": "parsed-order-form",
+        }
 
     card_records = extract_product_card_products_from_text(page_text, page_name, filename=filename, page_num=page_num)
     if card_records:
@@ -2834,6 +2997,10 @@ def quality_intelligence_v17(imported):
             if "multicard_split_review" not in flags: flags.append("multicard_split_review")
         elif method=="product-card":
             if re.fullmatch(r"\d+", sku) and not re.fullmatch(r"\d{5}", sku): flags.append("product_sku_suspicious"); base-=.30
+        elif method=="order-form-dual-price":
+            if not supplier: flags.append("supplier_sku_missing"); base-=.30
+            if not title or title==sku: flags.append("weak_title"); base-=.25
+            base=max(base,0.92 if supplier and title else base)
         elif method in {"row-price","text-row-price"}:
             # Row/price heuristics are useful for true price lists, but are never allowed a near-perfect score.
             base=min(base,0.84)
@@ -2929,11 +3096,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.0"
+        and str(manifest.get("version", "")) == "1.8.1"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.0", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.1", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3009,7 +3176,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.0", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.1", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
