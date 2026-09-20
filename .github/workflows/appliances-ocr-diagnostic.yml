@@ -92,7 +92,17 @@ jobs:
                   }
               summary[str(page_num)]=page_summary
 
+          # Also capture the frozen extractor's direct page records before
+          # document-level post-processing/suppression.
+          direct={}
+          for page_num in targets:
+              records, page_report = c.extract_visual_catalog_products(doc,page_num,filename="AppliancesPriceList-New.pdf",dpi=180)
+              direct[str(page_num)]={"report":page_report,"records":records}
+              pd.DataFrame(records).to_csv(out/f"p{page_num:02d}_direct_records.csv",index=False)
+
           doc.close()
+          with open(out/"direct_extract.json","w",encoding="utf-8") as f:
+              json.dump(direct,f,ensure_ascii=False,indent=2,default=str)
           with open(out/"summary.json","w",encoding="utf-8") as f:
               json.dump(summary,f,ensure_ascii=False,indent=2)
           print(json.dumps(summary,ensure_ascii=False,indent=2))
