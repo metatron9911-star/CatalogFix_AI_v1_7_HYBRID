@@ -35,6 +35,13 @@ jobs:
           cp railway.toml CatalogFix_AI_v1_8_15/
           cp .gitignore CatalogFix_AI_v1_8_15/
           [ -f demo_messy_catalog.csv ] && cp demo_messy_catalog.csv CatalogFix_AI_v1_8_15/ || true
+          RELEASE_VERSION=$(python -c "import catalogfix_core; print(catalogfix_core.RELEASE_VERSION)")
+          CHECKPOINT_VERSION=$(python -c "import catalogfix_core; print(catalogfix_core.CHECKPOINT_VERSION)")
+          {
+            echo "GIT_SHA=$GITHUB_SHA"
+            echo "RELEASE_VERSION=$RELEASE_VERSION"
+            echo "CHECKPOINT_VERSION=$CHECKPOINT_VERSION"
+          } > CatalogFix_AI_v1_8_15/BUILD_INFO.txt
 
       - name: Upload source ZIP
         uses: actions/upload-artifact@v4
