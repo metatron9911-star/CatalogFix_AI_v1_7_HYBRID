@@ -14,8 +14,8 @@ from catalogfix_core import (
     to_excel_bytes,
 )
 
-st.set_page_config(page_title="CatalogFix AI v1.7", page_icon="🧹", layout="wide")
-st.title("CatalogFix AI v1.7")
+st.set_page_config(page_title="CatalogFix AI v1.7.9", page_icon="🧹", layout="wide")
+st.title("CatalogFix AI v1.7.9")
 st.caption("Hybrid Quality Intelligence: universal routing + visual layout intelligence + context memory + dedupe + sanity checks + QA")
 
 st.info("Hybrid Quality Intelligence is ON: universal page routing + multi-pass visual OCR + page-context category memory + conservative dimension sanity checks + visual duplicate suppression + confidence/QA. Large PDFs autosave and resume after interruption.")
@@ -112,12 +112,14 @@ if name_l.endswith(".pdf"):
     qs = pdf_meta.get("quality_stats", {}) or {}
     if qs:
         st.subheader("Quality Intelligence")
-        q1,q2,q3,q4,q5 = st.columns(5)
+        q1,q2,q3,q4,q5,q6,q7 = st.columns(7)
         q1.metric("Input candidates", qs.get("input_rows", 0))
         q2.metric("After quality pass", qs.get("output_rows", 0))
         q3.metric("Duplicates removed", qs.get("duplicates_removed", 0))
-        q4.metric("Categories inherited", qs.get("categories_inherited", 0))
-        q5.metric("Dimensions corrected", qs.get("dimensions_corrected", 0))
+        q4.metric("Categories inferred", qs.get("categories_inferred", 0))
+        q5.metric("Categories inherited", qs.get("categories_inherited", 0))
+        q6.metric("Brands inferred", qs.get("brands_inferred", 0))
+        q7.metric("Titles trimmed", qs.get("body_tails_trimmed", 0))
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Products detected", len(cleaned))
