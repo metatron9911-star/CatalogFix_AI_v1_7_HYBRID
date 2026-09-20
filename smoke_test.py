@@ -76,4 +76,41 @@ except Exception as exc:
     print(f"VISUAL PDF SMOKE FAIL: {type(exc).__name__}: {exc}")
     sys.exit(1)
 
-print("OK: syntax + import + smart_import_pdf + visual OCR route")
+# Structured order-form route: generate enough trusted rows to exercise the
+# order-form dominance threshold and suppression branch.
+try:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    y = 72
+    page.insert_text((50, y), "ORDER FORM", fontsize=12)
+    y += 24
+    page.insert_text((50, y), "ITEM NO     DESCRIPTION                       KIT PRICE     ASSEMBLED PRICE", fontsize=9)
+    y += 18
+    for n in range(1, 13):
+        code = f"T{n:02d}"
+        page.insert_text((50, y), f"{code:<10} TEST PRODUCT {n:<20} $ {100+n:.2f}       $ {200+n:.2f}", fontsize=8)
+        y += 18
+    order_bytes = doc.tobytes()
+    doc.close()
+    order_buf = io.BytesIO(order_bytes)
+    with tempfile.TemporaryDirectory() as tmp:
+        imported_o, report_o, meta_o = catalogfix_core.smart_import_pdf(
+            order_buf,
+            filename="smoke-order-form.pdf",
+            checkpoint_dir=tmp,
+            resume=False,
+            return_meta=True,
+            visual_ocr=False,
+        )
+    if imported_o is None or imported_o.empty:
+        raise AssertionError("ORDER-FORM SMOKE: no products parsed")
+    methods = set(imported_o["import_method"].astype(str))
+    if "order-form-dual-price" not in methods:
+        raise AssertionError(f"ORDER-FORM SMOKE: wrong methods {sorted(methods)}")
+    if "quality_stats" not in meta_o:
+        raise AssertionError("ORDER-FORM SMOKE: quality_stats missing")
+except Exception as exc:
+    print(f"ORDER-FORM SMOKE FAIL: {type(exc).__name__}: {exc}")
+    sys.exit(1)
+
+print("OK: syntax + import + smart_import_pdf + visual OCR route + order-form route")
