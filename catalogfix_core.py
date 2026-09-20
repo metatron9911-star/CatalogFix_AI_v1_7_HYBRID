@@ -14,7 +14,7 @@ import time
 from pypdf import PdfReader
 
 RELEASE_VERSION = "1.8.15"
-CHECKPOINT_VERSION = RELEASE_VERSION
+CHECKPOINT_VERSION = "pdf-pipeline-v8"
 
 try:
     import fitz  # PyMuPDF for fast page rendering
