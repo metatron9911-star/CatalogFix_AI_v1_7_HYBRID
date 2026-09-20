@@ -1778,7 +1778,7 @@ def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records,
             "attributes_json":json.dumps({
                 "supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
                 "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],
-                "scanner":"v1.8.11-image-card"
+                "scanner":"v1.8.12-image-card"
             },ensure_ascii=False)
         })
     return out
@@ -1852,7 +1852,7 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=150):
                 "ocr_engine":eng,"ocr_dpi":pass_dpi,"ocr_confidence":round(ocr_conf,3),
                 "scanner_confidence":round(scanner_conf,3),
                 "sku_bbox":[round(x1,1),round(y1,1),round(x2,1),round(y2,1)],
-                "price_source":"missing","scanner":"v1.8.11-adaptive-high-intelligence"
+                "price_source":"missing","scanner":"v1.8.12-adaptive-high-intelligence"
             },ensure_ascii=False)
         })
 
@@ -1892,6 +1892,22 @@ def _document_type_safety_v18(page_texts):
     if tech_hits >= 4 and commercial_evidence == 0:
         return {"type":"technical-datasheet","technical_hits":tech_hits,"commercial_hits":commercial_hits}
     return {"type":"catalog-or-unknown","technical_hits":tech_hits,"commercial_hits":commercial_hits,"statistical_hits":stat_hits}
+
+
+def _page_has_commercial_signal_v19(text):
+    """Fast boolean probe used only to protect hybrid datasheet+price PDFs from whole-document rejection."""
+    raw=str(text or "")
+    low=raw.lower()
+    if not low.strip():
+        return False
+    if any(h.lower() in low for h in _COMMERCIAL_PRICE_HINTS):
+        return True
+    if re.search(r"(?:[$€£₽₹]|\b(?:usd|eur|gbp|pln|uah|inr|zar|aud|cad)\b)\s*\d", raw, re.I):
+        return True
+    if re.search(r"\b(?:item|part|stock|product|support)\s*(?:no|number|code|#)\b", low, re.I) and \
+       re.search(r"\b(?:unit|list|retail|assembled|kit)\s+price\b", low, re.I):
+        return True
+    return False
 
 def classify_pdf_page_text(text):
     """Cheap routing decision used before heavy parsing."""
@@ -2340,7 +2356,7 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
     return records
 
 
-# v1.8.11 Order-form / dual-price catalogue parser
+# v1.8.12 Order-form / dual-price catalogue parser
 
 _BAD_ITEM_WORDS_V181 = {"price","total","note","see","page","item","kit","qty","quantity","terms","handling","tax"}
 
@@ -2505,7 +2521,7 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     return records if len(good)>=3 else []
 
 
-# v1.8.11 regression parsers: standard B2B tables, no-SKU price tables,
+# v1.8.12 regression parsers: standard B2B tables, no-SKU price tables,
 # tiered services and vehicle multi-price rows.
 def _parse_price_v183(value):
     t=clean_text(value)
@@ -3318,7 +3334,7 @@ def quality_intelligence_v17(imported):
         base=v if v else (0.94 if clean_text(r.get("import_confidence"))=="HIGH" else 0.78 if clean_text(r.get("import_confidence"))=="MEDIUM" else 0.58)
         cat=clean_text(r.get("category","")); title=clean_text(r.get("title","")); supplier=clean_text(r.get("supplier_code",""))
         method=clean_text(r.get("import_method","")); sku=clean_text(r.get("sku","")); color=clean_text(r.get("color",""))
-        if not supplier and sku.startswith("VIS-"): flags.append("supplier_sku_missing"); base-=.12
+        if not supplier and (sku.startswith("VIS-") or sku.startswith("CAND-") or method in {"visual-card-fallback","visual-named-price-card"}): flags.append("supplier_sku_missing"); base-=.12
         if not cat or cat=="Visual Catalog": flags.append("generic_category"); base-=.05
         if not title or title==sku: flags.append("weak_title"); base-=.12
         low_title=title.lower()
@@ -3354,6 +3370,9 @@ def quality_intelligence_v17(imported):
         df.at[i,"quality_flags"]=", ".join(flags)
     stats["output_rows"]=len(df); stats["generic_categories"]=int(df["category"].map(lambda x: clean_text(x) in {"", "Visual Catalog"}).sum())
     stats["needs_supplier_sku"]=int(df["quality_flags"].astype(str).str.contains("supplier_sku_missing").sum())
+    expected_output=stats["input_rows"]-stats["duplicates_removed"]
+    stats["invariant_input_output_mismatch"]=bool(stats["output_rows"] != expected_output)
+    stats["invariant_delta"]=int(stats["output_rows"]-expected_output)
     return df, stats
 
 def smart_import_pdf(
@@ -3405,33 +3424,49 @@ def smart_import_pdf(
             sample_texts.append("")
     doc_safety=_document_type_safety_v18(sample_texts)
     if doc_safety.get("type") in {"technical-datasheet","statistical-report"}:
-        dtype=doc_safety.get("type")
-        router="TECHNICAL_DATASHEET" if dtype=="technical-datasheet" else "STATISTICAL_REPORT"
-        report=pd.DataFrame([{
-            "sheet":"DOCUMENT","source_rows":0,"source_columns":0,
-            "matrix_products":0,"dimension_products":0,"row_price_products":0,
-            "header_products":0,"pattern_products":0,"product_card_products":0,
-            "visual_products":0,"router_type":router,"scan_status":f"skipped-{dtype}"
-        }])
-        meta={
-            "job_id":_checkpoint_job_id(data, filename),"checkpoint_folder":"",
-            "chunk_size":chunk_size,"total_pages":total_pages,"candidate_pages":0,
-            "visual_pages":0,"structured_pages":0,"resumed_chunks":0,
-            "document_type":dtype,"document_safety":doc_safety,
-            "quality_stats":{"input_rows":0,"output_rows":0,"duplicates_removed":0},
-        }
-        empty=_dedupe_imported([])
-        return (empty, report, meta) if return_meta else (empty, report)
+        # v1.8.12 hybrid protection: a sample may look like a datasheet while a real
+        # price list exists elsewhere. Probe pages one-by-one without retaining text.
+        hybrid_commercial_page=None
+        for probe_idx in range(total_pages):
+            try:
+                probe_text=fast_reader.pages[probe_idx].extract_text() or ""
+            except Exception:
+                probe_text=""
+            if _page_has_commercial_signal_v19(probe_text):
+                hybrid_commercial_page=probe_idx+1
+                break
+        if hybrid_commercial_page is None:
+            dtype=doc_safety.get("type")
+            router="TECHNICAL_DATASHEET" if dtype=="technical-datasheet" else "STATISTICAL_REPORT"
+            report=pd.DataFrame([{
+                "sheet":"DOCUMENT","source_rows":0,"source_columns":0,
+                "matrix_products":0,"dimension_products":0,"row_price_products":0,
+                "header_products":0,"pattern_products":0,"product_card_products":0,
+                "visual_products":0,"router_type":router,"scan_status":f"skipped-{dtype}"
+            }])
+            meta={
+                "job_id":_checkpoint_job_id(data, filename),"checkpoint_folder":"",
+                "chunk_size":chunk_size,"total_pages":total_pages,"candidate_pages":0,
+                "visual_pages":0,"structured_pages":0,"resumed_chunks":0,
+                "document_type":dtype,"document_safety":doc_safety,
+                "quality_stats":{"input_rows":0,"output_rows":0,"duplicates_removed":0,
+                                 "invariant_input_output_mismatch":False,"invariant_delta":0},
+            }
+            empty=_dedupe_imported([])
+            return (empty, report, meta) if return_meta else (empty, report)
+        doc_safety=dict(doc_safety)
+        doc_safety["type"]="hybrid-commercial"
+        doc_safety["commercial_page_detected"]=hybrid_commercial_page
     manifest = _load_json(manifest_path, {}) if resume else {}
     valid_manifest = (
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.11"
+        and str(manifest.get("version", "")) == "1.8.12"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.11", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.12", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3508,7 +3543,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.11", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.12", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
