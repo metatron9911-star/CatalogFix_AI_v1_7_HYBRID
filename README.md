@@ -1,4 +1,4 @@
-# CatalogFix AI v1.8.15 — Hybrid Quality Intelligence
+# CatalogFix AI v1.9.0 — Hybrid Quality Intelligence
 
 CatalogFix converts supplier CSV, Excel and PDF catalogues into a normalized product master, QA report, and safe Shopify-ready export.
 
@@ -48,10 +48,11 @@ The safety gate is heuristic and document-scoped. If a representative sample loo
 When the representative sample looks like a technical datasheet or statistical report, CatalogFix performs a lightweight page-by-page text probe for commercial markers. The probe does not retain page text in memory and stops immediately at the first genuine commercial signal. If no commercial signal is found anywhere in the document, the whole file is rejected before OCR/product extraction.
 
 ## Checkpoint compatibility
-Checkpoint manifests are version-gated. Checkpoints created by v1.8.11 are intentionally not reused by v1.8.15 or later; the first run after a processing-version change performs a clean rescan. Resume/reproducibility should therefore be validated with two runs of the same version.
+Checkpoint manifests use a dedicated processing compatibility key (`CHECKPOINT_VERSION`, currently `pdf-pipeline-v8`) that is decoupled from the public release version. Checkpoints are reused only when that processing key is compatible. Resume/reproducibility should be validated with two runs using the same compatibility key.
 
 
 ## Known limitations / v1.9.x backlog
+- Named-price recovery on mixed visual pages is page-scoped: if a page already yields real supplier SKUs, the named-price fallback may skip uncoded cards on that same page. Future work should use bbox-level dedupe against records with non-empty `supplier_code` only.
 - Order-form weak-row suppression currently runs before title repair/final polish. A future v1.9.x cleanup should move or repeat that decision after title normalization so suppression predicates operate on the final title shape.
 - Tighten the pattern-ID / global-product-ID source regex so prose fragments containing mixed letters and digits cannot enter the `pattern-id` route merely because they resemble a compact code.
 - Review the generic `row-price` / compact-code heuristics against additional non-order-form PDFs; malformed text-layer prose can otherwise resemble product identifiers.
