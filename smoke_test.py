@@ -19,13 +19,13 @@ for name in FILES:
 
 try:
     import catalogfix_core
+    import fitz
     from pypdf import PdfWriter
 except Exception as exc:
     print(f"IMPORT FAIL: {type(exc).__name__}: {exc}")
     sys.exit(1)
 
-# Exercise smart_import_pdf itself, not only module import. A one-page blank PDF is
-# enough to execute checkpoint setup, page routing and return_meta plumbing.
+# Text/no-OCR route: exercises checkpoint setup, routing and return_meta plumbing.
 try:
     writer = PdfWriter()
     writer.add_blank_page(width=200, height=200)
@@ -35,7 +35,7 @@ try:
     with tempfile.TemporaryDirectory() as tmp:
         imported, report, meta = catalogfix_core.smart_import_pdf(
             buf,
-            filename="smoke.pdf",
+            filename="smoke-no-ocr.pdf",
             checkpoint_dir=tmp,
             resume=False,
             return_meta=True,
@@ -48,4 +48,32 @@ except Exception as exc:
     print(f"PDF SMOKE FAIL: {type(exc).__name__}: {exc}")
     sys.exit(1)
 
-print("OK: syntax + import + smart_import_pdf")
+# Visual/OCR route: create a one-page PDF with no text layer and let the production
+# PyMuPDF + RapidOCR path execute. It may find zero products, but must not error.
+try:
+    doc = fitz.open()
+    doc.new_page(width=200, height=200)
+    visual_bytes = doc.tobytes()
+    doc.close()
+    visual_buf = io.BytesIO(visual_bytes)
+    with tempfile.TemporaryDirectory() as tmp:
+        imported_v, report_v, meta_v = catalogfix_core.smart_import_pdf(
+            visual_buf,
+            filename="smoke-visual.pdf",
+            checkpoint_dir=tmp,
+            resume=False,
+            return_meta=True,
+            visual_ocr=True,
+            ocr_dpi=100,
+        )
+    assert meta_v["total_pages"] == 1
+    assert meta_v.get("visual_pages", 0) == 1
+    if report_v is not None and not report_v.empty and "scan_status" in report_v.columns:
+        statuses = " ".join(report_v["scan_status"].astype(str).tolist())
+        assert "visual-error" not in statuses
+        assert "visual-ocr-unavailable" not in statuses
+except Exception as exc:
+    print(f"VISUAL PDF SMOKE FAIL: {type(exc).__name__}: {exc}")
+    sys.exit(1)
+
+print("OK: syntax + import + smart_import_pdf + visual OCR route")
