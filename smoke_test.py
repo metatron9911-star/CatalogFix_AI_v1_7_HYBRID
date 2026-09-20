@@ -77,18 +77,22 @@ except Exception as exc:
     sys.exit(1)
 
 # Structured order-form route: generate enough trusted rows to exercise the
-# order-form dominance threshold and suppression branch.
+# order-form dominance threshold and its math/quality plumbing.
 try:
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
-    y = 72
-    page.insert_text((50, y), "ORDER FORM", fontsize=12)
-    y += 24
-    page.insert_text((50, y), "ITEM NO     DESCRIPTION                       KIT PRICE     ASSEMBLED PRICE", fontsize=9)
-    y += 18
+    page.insert_text((45, 55), "IMSAI ORDER FORM", fontsize=12)
+    page.insert_text((125, 85), "ITEM NO", fontsize=8)
+    page.insert_text((220, 85), "DESCRIPTION", fontsize=8)
+    page.insert_text((480, 85), "KIT PRICE", fontsize=8)
+    page.insert_text((540, 85), "ASSEMBLED PRICE", fontsize=7)
+    page.insert_text((220, 105), "MEMORY EXPANSION", fontsize=9)
+    y = 130
     for n in range(1, 13):
-        code = f"T{n:02d}"
-        page.insert_text((50, y), f"{code:<10} TEST PRODUCT {n:<20} $ {100+n:.2f}       $ {200+n:.2f}", fontsize=8)
+        page.insert_text((130, y), f"T{n:02d}", fontsize=8)
+        page.insert_text((220, y), f"TEST PRODUCT {n}", fontsize=8)
+        page.insert_text((485, y), f"$ {100+n:.2f}", fontsize=8)
+        page.insert_text((545, y), f"$ {200+n:.2f}", fontsize=8)
         y += 18
     order_bytes = doc.tobytes()
     doc.close()
@@ -105,8 +109,10 @@ try:
     if imported_o is None or imported_o.empty:
         raise AssertionError("ORDER-FORM SMOKE: no products parsed")
     methods = set(imported_o["import_method"].astype(str))
-    if "order-form-dual-price" not in methods:
+    if methods != {"order-form-dual-price"}:
         raise AssertionError(f"ORDER-FORM SMOKE: wrong methods {sorted(methods)}")
+    if len(imported_o) != 12:
+        raise AssertionError(f"ORDER-FORM SMOKE: expected 12 rows, got {len(imported_o)}")
     if "quality_stats" not in meta_o:
         raise AssertionError("ORDER-FORM SMOKE: quality_stats missing")
 except Exception as exc:
