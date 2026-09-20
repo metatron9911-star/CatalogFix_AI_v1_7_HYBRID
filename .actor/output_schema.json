@@ -1,0 +1,37 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "CatalogFix AI outputs",
+  "description": "Structured product rows are stored in the Dataset. The complete workbook and audit files are stored in the default Key-value store.",
+  "properties": {
+    "productRows": {
+      "type": "string",
+      "title": "Product rows and run summary",
+      "description": "Normalized rows with source and quality context plus one summary record.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    },
+    "resultWorkbook": {
+      "type": "string",
+      "title": "Full Excel workbook",
+      "description": "Clean Master, Issues Found, Shopify Ready, Needs Review and Import Report.",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/RESULT.xlsx"
+    },
+    "shopifyReadyCsv": {
+      "type": "string",
+      "title": "Shopify Ready CSV",
+      "description": "Only rows that passed the current CatalogFix release gates.",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/SHOPIFY_READY.csv"
+    },
+    "summary": {
+      "type": "string",
+      "title": "Run summary",
+      "description": "Counts, document type, quality statistics and output keys.",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/SUMMARY.json"
+    },
+    "importReport": {
+      "type": "string",
+      "title": "Import report",
+      "description": "Per-page or per-sheet routing and parsing audit information.",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/IMPORT_REPORT.json"
+    }
+  }
+}
