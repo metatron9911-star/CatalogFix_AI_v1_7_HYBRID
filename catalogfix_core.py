@@ -1809,6 +1809,7 @@ _PROMO_PHRASES = (
 _TITLE_STOP_PREFIXES = (
     "не является", "способ применения", "применение", "принимай", "нанеси", "используй",
     "по результатам", "макияж модели", "зарядись", "запомни", "скидка", "закажи",
+    "материал", "размер", "состав", "ингредиенты", "объем", "объём",
 )
 
 
@@ -2029,7 +2030,8 @@ def _title_fragment(extra):
     if m2: cut=min(cut,m2.start())
     frag=clean_text(x[:cut])
     stop=(cut<len(x))
-    if any(low.startswith(y) for y in _TITLE_STOP_PREFIXES) or _NUMERIC_SKU_RE.search(frag): return "", True
+    # Any additional catalogue SKU on a wrapped line is a hard card boundary.
+    if any(low.startswith(y) for y in _TITLE_STOP_PREFIXES) or _NUMERIC_SKU_RE.search(x): return "", True
     if frag.startswith("•") or len(frag)>95: return "", True
     if frag.endswith("."): stop=True
     return frag, stop
@@ -2397,7 +2399,19 @@ def _title_sanity_flags_v177(title, sku=""):
     # Obvious prose spill: sentence-like copy is not a catalogue title.
     if len(t.split()) > 18 or (len(t.split()) > 12 and re.search(r"[.!?]", t)):
         flags.append("title_too_long")
-    return flags
+    if re.search(r"\b(?:материал|размер|состав)\s*:", t, re.I) or re.search(r"\bне является лекарством\b", t, re.I):
+        flags.append("body_copy_spill")
+    # A pack size embedded in the middle of a title is a common two-column PDF merge artefact.
+    if re.search(r"\b\d+(?:[,.]\d+)?\s*(?:мл|ml|г|g)\.?\s+\S+", t, re.I):
+        flags.append("size_inside_title")
+    if re.search(r"\bконцентраци[яи]\s+аромата\b", t, re.I):
+        flags.append("fragrance_copy_spill")
+    # Detect immediate repeated 2-5 word phrases caused by duplicated PDF text layers.
+    words=t.lower().split()
+    for n in range(5,1,-1):
+        if any(words[j:j+n] == words[j+n:j+2*n] for j in range(0, max(0,len(words)-2*n+1))):
+            flags.append("repeated_title_phrase"); break
+    return list(dict.fromkeys(flags))
 
 def _repair_title_v177(title, sku="", description="", variant_group="", method=""):
     """Conservatively repair title text; never invent wording absent from parsed fields."""
@@ -2595,6 +2609,49 @@ def title_recovery_and_multicard_v176(imported):
     return df, {"titles_recovered":recovered, "multicards_split":len(new_rows)}
 
 
+# v1.7.9 Catalog Context + Conservative Taxonomy
+# These rules infer only broad product classes from literal title/description words.
+# They never invent SKU, price, shade, size, or product-specific claims.
+_CATEGORY_RULES_V179 = (
+    ("Макияж / Тушь для ресниц", (r"\bтуш(?:ь|и)\b", r"\bmascara\b", r"wonderlash")),
+    ("Макияж / Губы", (r"помад", r"блеск.{0,12}губ", r"карандаш.{0,12}губ", r"lip(?:stick|gloss|liner)")),
+    ("Макияж / Лицо", (r"тональн", r"консилер", r"пудр", r"румян", r"хайлайтер", r"бронзер", r"foundation", r"concealer")),
+    ("Дезодоранты", (r"дезодоран", r"антиперспиран", r"deodorant", r"antiperspirant")),
+    ("Парфюмерия", (r"туалетн.{0,10}вод", r"парфюмерн.{0,10}вод", r"\bдухи\b", r"eau de", r"fragrance", r"парфюмированн.{0,16}спрей")),
+    ("Уход за телом", (r"крем.{0,16}тела", r"лосьон.{0,16}тела", r"гель.{0,16}душ", r"скраб.{0,16}тела", r"body (?:cream|lotion|wash|scrub)")),
+    ("Уход за волосами", (r"шампун", r"кондиционер.{0,16}волос", r"маск.{0,16}волос", r"сыворотк.{0,16}волос", r"пре-шампун", r"расч[её]ск", r"щ[её]тк.{0,16}волос", r"hair (?:shampoo|conditioner|serum|mask|brush)")),
+    ("Уход за лицом", (r"крем.{0,16}лиц", r"сыворотк.{0,16}лиц", r"умыван", r"очищен.{0,12}лиц", r"тоник.{0,12}лиц", r"face (?:cream|serum|cleanser|toner)")),
+    ("Wellness / Пищевые добавки", (r"биологически активн", r"мультивитамин", r"омега-?3", r"витамин\s+[a-zа-я0-9]", r"питательн.{0,16}коктейл", r"пребиот", r"кальци", r"wellness", r"orimetabo")),
+    ("Аксессуары", (r"кошел[её]к", r"косметичк", r"\bсумк", r"инструмент", r"аксессуар", r"\bbrush\b", r"\bcomb\b")),
+)
+
+def _infer_category_v179(title, description=""):
+    text=clean_text(f"{title} {description}").lower()
+    if not text:
+        return ""
+    for category, patterns in _CATEGORY_RULES_V179:
+        if any(re.search(p, text, re.I) for p in patterns):
+            return category
+    return ""
+
+def _dominant_catalog_brand_v179(df):
+    vals=[clean_text(v) for v in df.get("brand", pd.Series(dtype=object)).tolist() if clean_text(v)]
+    if len(vals) < 5:
+        return ""
+    counts=Counter(vals)
+    brand,n=counts.most_common(1)[0]
+    # Require a strong single-brand signal before propagating document context.
+    return brand if n / max(len(vals),1) >= 0.85 else ""
+
+def _repair_body_copy_tail_v179(title):
+    t=clean_text(title)
+    if not t:
+        return ""
+    # Safe hard boundaries: everything after these labels is specification/legal copy, not a title.
+    parts=re.split(r"\b(?:Не является лекарством|Материал\s*:|Способ применения\s*:|Применение\s*:|Принимай\b|Нанеси\b)", t, maxsplit=1, flags=re.I)
+    candidate=clean_text(parts[0]).strip(" .,:;-–—")
+    return candidate if len(candidate) >= 4 else t
+
 def quality_intelligence_v17(imported):
     """Cross-page quality layer: category memory, conservative size sanity, title cleanup,
     spatial/size duplicate suppression and per-row quality confidence.
@@ -2622,7 +2679,35 @@ def quality_intelligence_v17(imported):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").astype("float64")
 
-    stats={"input_rows":len(df),"duplicates_removed":0,"categories_inherited":0,"dimensions_corrected":0,"titles_cleaned":0}
+    stats={"input_rows":len(df),"duplicates_removed":0,"categories_inherited":0,"dimensions_corrected":0,"titles_cleaned":0,
+           "categories_inferred":0,"brands_inferred":0,"body_tails_trimmed":0}
+
+    # v1.7.9 whole-catalog context. Fill brand only when the document already provides
+    # a strong single-brand signal; infer only broad categories from literal product words.
+    dominant_brand=_dominant_catalog_brand_v179(df)
+    for i,r in df.iterrows():
+        method=clean_text(r.get("import_method",""))
+        if dominant_brand and not clean_text(r.get("brand","")) and method.startswith("product-card"):
+            df.at[i,"brand"]=dominant_brand
+            stats["brands_inferred"]+=1
+            flags=[x.strip() for x in clean_text(r.get("quality_flags","")).split(",") if x.strip()]
+            if "brand_inferred_catalog" not in flags: flags.append("brand_inferred_catalog")
+            df.at[i,"quality_flags"] = ", ".join(flags)
+        cat=clean_text(r.get("category",""))
+        if not cat or cat=="Visual Catalog":
+            inferred=_infer_category_v179(r.get("title",""), r.get("description",""))
+            if inferred:
+                df.at[i,"category"]=inferred
+                df.at[i,"category_source"]="title-rule"
+                stats["categories_inferred"]+=1
+        old_title=clean_text(r.get("title",""))
+        trimmed=_repair_body_copy_tail_v179(old_title)
+        if trimmed != old_title:
+            df.at[i,"title"]=trimmed
+            if clean_text(r.get("description","")) == old_title:
+                df.at[i,"description"]=trimmed
+            stats["body_tails_trimmed"]+=1
+
     # Page context memory. Only propagate specific categories through short runs of visual pages.
     page_cat={}
     for _,r in df.iterrows():
@@ -2715,7 +2800,7 @@ def quality_intelligence_v17(imported):
             if len(title.split())<2 or re.search(r"^(?:\d+|\d+\s*[=xхв])$", title, re.I):
                 flags.append("row_price_weak_title"); base-=.30
         # v1.7.7 text sanity penalties. These flags are created before this quality pass.
-        text_gate = {"pdf_cid_glyphs","pdf_symbol_noise","title_symbol_ratio","title_fragment","foreign_sku_in_title","title_too_long","title_empty_after_repair","residual_pdf_punct"}
+        text_gate = {"pdf_cid_glyphs","pdf_symbol_noise","title_symbol_ratio","title_fragment","foreign_sku_in_title","title_too_long","title_empty_after_repair","residual_pdf_punct","body_copy_spill","size_inside_title","fragrance_copy_spill","repeated_title_phrase"}
         present_text_flags=set(flags).intersection(text_gate)
         if present_text_flags:
             base -= min(0.35, 0.12 * len(present_text_flags))
@@ -2724,7 +2809,7 @@ def quality_intelligence_v17(imported):
         flags=list(dict.fromkeys(flags))
         df.at[i,"quality_confidence"]=round(max(.05,min(.99,base)),3)
         df.at[i,"quality_flags"]=", ".join(flags)
-    stats["output_rows"]=len(df); stats["generic_categories"]=int((df["category"].map(clean_text)=="Visual Catalog").sum())
+    stats["output_rows"]=len(df); stats["generic_categories"]=int(df["category"].map(lambda x: clean_text(x) in {"", "Visual Catalog"}).sum())
     stats["needs_supplier_sku"]=int(df["quality_flags"].astype(str).str.contains("supplier_sku_missing").sum())
     return df, stats
 
@@ -2740,7 +2825,7 @@ def smart_import_pdf(
     ocr_dpi=180,
 ):
     """
-    v1.7.8 Final Title Polish: preserves v1.7.7 routing/variants/QA and removes only residual orphan PDF punctuation from recovered titles.
+    v1.7.9 Catalog Context + Safer Titles: preserves v1.7.7 routing/variants/QA and removes only residual orphan PDF punctuation from recovered titles.
 
     Routes each PDF page independently to structured-table, text-product, or visual OCR parsing.
     There is no artificial page-count cutoff. Large files are checkpointed in fixed chunks.
@@ -2766,11 +2851,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.7.8"
+        and str(manifest.get("version", "")) == "1.7.9"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.7.8", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.7.9", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -2846,7 +2931,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.7.8", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.7.9", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
@@ -2965,14 +3050,15 @@ def process_canonical(imported):
             qconf = float(row.get("quality_confidence", "") or 0)
         except Exception:
             qconf = 0.0
-        gate_flags = {"weak_title", "promo_or_noise_title", "variant_sku_suspicious", "variant_name_missing", "title_boundary_suspect", "row_price_weak_title", "product_sku_suspicious", "multicard_split_review", "pdf_cid_glyphs", "pdf_symbol_noise", "title_symbol_ratio", "title_fragment", "foreign_sku_in_title", "title_too_long", "title_empty_after_repair", "residual_pdf_punct"}
+        gate_flags = {"weak_title", "promo_or_noise_title", "variant_sku_suspicious", "variant_name_missing", "title_boundary_suspect", "row_price_weak_title", "product_sku_suspicious", "multicard_split_review", "pdf_cid_glyphs", "pdf_symbol_noise", "title_symbol_ratio", "title_fragment", "foreign_sku_in_title", "title_too_long", "title_empty_after_repair", "residual_pdf_punct", "body_copy_spill", "size_inside_title", "fragrance_copy_spill", "repeated_title_phrase"}
         present_flags = {x.strip() for x in qflags.split(",") if x.strip()}
         sanity_now = set(_title_sanity_flags_v177(row.get("title", ""), sku))
         present_flags.update(sanity_now)
         if qconf and qconf < 0.72:
             add_issue(index, sku, "Low quality confidence — verify product card", "quality_confidence", qconf, "Gate")
         if gate_flags.intersection(present_flags):
-            add_issue(index, sku, "Quality gate blocked uncertain extraction", "quality_flags", qflags, "Gate")
+            blocked = ", ".join(sorted(gate_flags.intersection(present_flags)))
+            add_issue(index, sku, "Quality gate blocked uncertain extraction", "quality_flags", blocked or qflags, "Gate")
         if any(x in title_low for x in _PROMO_PHRASES) or re.search(r"\b(?:подробнее|скидка|закажи)\b", title_low):
             add_issue(index, sku, "Promotional text detected in product title", "title", row.get("title", ""), "Gate")
         if method == "product-card-variant":
