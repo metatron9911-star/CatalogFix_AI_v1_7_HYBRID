@@ -3650,8 +3650,9 @@ def process_canonical(imported):
             vconf = float(row.get("visual_confidence", "") or 0)
         except Exception:
             vconf = 0
-        if clean_text(row.get("import_method", "")) == "visual-ocr" and vconf and vconf < 0.60:
-            add_issue(index, sku, "Low OCR confidence — verify supplier code", "sku", sku, "Gate")
+        method_now=clean_text(row.get("import_method", ""))
+        if method_now.startswith("visual-") and vconf and vconf < 0.60:
+            add_issue(index, sku, "Low OCR confidence — verify visual extraction", "sku", sku, "Gate")
 
         # v1.7.8 export gate: uncertain parser output must not silently enter Shopify Ready.
         method = clean_text(row.get("import_method", ""))
