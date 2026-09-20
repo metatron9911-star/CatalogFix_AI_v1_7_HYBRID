@@ -1760,123 +1760,94 @@ def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records,
         })
     return out
 
-def extract_visual_catalog_products(doc, page_num, filename="", dpi=140):
-    """v1.6 High Intelligence Scanner: multi-pass OCR + geometry-aware product association."""
-    passes = []
-    image, boxes, engine_name = _ocr_visual_pass(doc, page_num, dpi)
-    passes.append((dpi, image, boxes, engine_name))
 
-    # A second higher-resolution pass is used only when the first pass is weak.
-    first_codes = sum(len(_visual_codes_from_text(b.get("text", ""))) for b in boxes)
-    avg_score = (sum(float(b.get("score",0) or 0) for b in boxes) / len(boxes)) if boxes else 0.0
-    if first_codes == 0 or avg_score < 0.72:
-        hi_dpi = max(190, int(dpi * 1.35))
+def extract_visual_catalog_products(doc, page_num, filename="", dpi=150):
+    """Adaptive visual OCR without retaining full raster images between passes."""
+    passes=[]
+    image,boxes,engine_name=_ocr_visual_pass(doc,page_num,dpi)
+    shape=image.shape
+    passes.append((dpi,shape,boxes,engine_name))
+    del image
+
+    first_codes=sum(len(_visual_codes_from_text(b.get("text",""))) for b in boxes)
+    avg_score=(sum(float(b.get("score",0) or 0) for b in boxes)/len(boxes)) if boxes else 0.0
+    has_price=any(
+        _visual_price_value(b.get("text","")) is not None and re.search(r"(?:[$€£₹₽]|/-)",clean_text(b.get("text","")))
+        for b in boxes
+    )
+    if first_codes==0 or avg_score<0.72 or not has_price:
+        hi_dpi=max(220,int(dpi*1.45))
         try:
-            image2, boxes2, engine2 = _ocr_visual_pass(doc, page_num, hi_dpi)
-            passes.append((hi_dpi, image2, boxes2, engine2))
+            image2,boxes2,engine2=_ocr_visual_pass(doc,page_num,hi_dpi)
+            shape2=image2.shape
+            passes.append((hi_dpi,shape2,boxes2,engine2))
+            del image2
         except Exception:
             pass
 
-    # Merge code detections across passes; keep the highest OCR confidence observation.
-    hits = {}
-    for pass_dpi, img, pboxes, eng in passes:
+    hits={}
+    for pass_dpi,pshape,pboxes,eng in passes:
         for b in pboxes:
-            for code in _visual_codes_from_text(b.get("text", "")):
-                item = (float(b.get("score",0) or 0), b, pboxes, img.shape, pass_dpi, eng)
-                if code not in hits or item[0] > hits[code][0]:
-                    hits[code] = item
+            for code in _visual_codes_from_text(b.get("text","")):
+                item=(float(b.get("score",0) or 0),b,pboxes,pshape,pass_dpi,eng)
+                if code not in hits or item[0]>hits[code][0]:
+                    hits[code]=item
 
-    page_boxes = max(passes, key=lambda p: len(p[2]))[2] if passes else []
-    page_shape = max(passes, key=lambda p: len(p[2]))[1].shape if passes else (1,1,3)
-    page_heading = _visual_heading(page_boxes, page_shape)
+    best=max(passes,key=lambda p:len(p[2])) if passes else (dpi,(1,1,3),[],engine_name)
+    page_boxes=best[2]
+    page_shape=best[1]
+    page_heading=_visual_heading(page_boxes,page_shape)
 
-    brand = ""
-    stem = Path(filename or "").stem
-    if stem and stem.lower() not in {"1", "catalog", "catalogue", "price", "pricelist"}:
-        possible = re.sub(r"[_-]+", " ", stem).strip()
-        if 2 <= len(possible) <= 40 and re.search(r"[A-Za-z]", possible):
-            brand = possible
+    brand=""
+    stem=Path(filename or "").stem
+    if stem and stem.lower() not in {"1","catalog","catalogue","price","pricelist"}:
+        possible=re.sub(r"[_-]+"," ",stem).strip()
+        if 2<=len(possible)<=40 and re.search(r"[A-Za-z]",possible):
+            brand=possible
 
-    records = []
-    for code, (ocr_conf, code_box, pboxes, shape, pass_dpi, eng) in sorted(hits.items()):
-        nearby_label, local_category = _local_visual_context(code_box, pboxes, shape)
-        category = local_category or page_heading or "Visual Catalog"
-        if category == "Visual Catalog" and nearby_label and not _looks_like_marketing_copy(nearby_label):
-            # Keep a clean short label without pretending it is a verified category.
-            title = f"{nearby_label} {code}" if len(nearby_label.split()) <= 6 else code
+    records=[]
+    for code,(ocr_conf,code_box,pboxes,pshape,pass_dpi,eng) in sorted(hits.items()):
+        nearby_label,local_category=_local_visual_context(code_box,pboxes,pshape)
+        category=local_category or page_heading or "Visual Catalog"
+        if category=="Visual Catalog" and nearby_label and not _looks_like_marketing_copy(nearby_label):
+            title=f"{nearby_label} {code}" if len(nearby_label.split())<=6 else code
         else:
-            title = f"{category} {code}" if category != "Visual Catalog" else code
-
-        # Layout confidence rewards a clean local association, but never hides OCR uncertainty.
-        layout_bonus = 0.10 if local_category else 0.05 if nearby_label else 0.0
-        scanner_conf = min(0.99, max(0.0, ocr_conf + layout_bonus))
-        confidence = "HIGH" if scanner_conf >= 0.88 else "MEDIUM" if scanner_conf >= 0.62 else "LOW"
-        x1,y1,x2,y2 = code_box["bbox"]
+            title=f"{category} {code}" if category!="Visual Catalog" else code
+        layout_bonus=.10 if local_category else .05 if nearby_label else 0.0
+        scanner_conf=min(.99,max(0.0,ocr_conf+layout_bonus))
+        confidence="HIGH" if scanner_conf>=.88 else "MEDIUM" if scanner_conf>=.62 else "LOW"
+        x1,y1,x2,y2=code_box["bbox"]
         records.append({
-            "sku": code, "title": title, "brand": brand, "price": None,
-            "category": category, "size": "", "color": "",
-            "description": f"Visual catalog item detected on PDF page {page_num}.",
-            "barcode": "", "source_sheet": f"PDF p.{page_num}", "source_row": page_num,
-            "supplier_code": code, "import_confidence": confidence,
-            "import_method": "visual-high-intelligence", "source_page": page_num,
-            "source_table": "visual-layout-page", "matrix_series": category,
-            "matrix_section": "Visual catalog", "matrix_model": code,
-            "variant_group": nearby_label or category, "variant_codes": code,
-            "currency": "", "vat_note": "", "visual_confidence": round(scanner_conf, 3),
-            "router_type": "VISUAL_HI",
-            "attributes_json": json.dumps({
-                "page_heading": page_heading, "nearby_label": nearby_label,
-                "local_category": local_category, "ocr_engine": eng,
-                "ocr_dpi": pass_dpi, "ocr_confidence": round(ocr_conf,3),
-                "scanner_confidence": round(scanner_conf,3),
-                "sku_bbox": [round(x1,1),round(y1,1),round(x2,1),round(y2,1)],
-                "price_source": "missing", "scanner": "v1.6.1-adaptive-high-intelligence"
-            }, ensure_ascii=False),
+            "sku":code,"title":title,"brand":brand,"price":None,"category":category,"size":"","color":"",
+            "description":f"Visual catalog item detected on PDF page {page_num}.","barcode":"",
+            "source_sheet":f"PDF p.{page_num}","source_row":page_num,"supplier_code":code,"import_confidence":confidence,
+            "import_method":"visual-high-intelligence","source_page":page_num,"source_table":"visual-layout-page",
+            "matrix_series":category,"matrix_section":"Visual catalog","matrix_model":code,"variant_group":nearby_label or category,
+            "variant_codes":code,"currency":"","vat_note":"","visual_confidence":round(scanner_conf,3),"router_type":"VISUAL_HI",
+            "attributes_json":json.dumps({
+                "page_heading":page_heading,"nearby_label":nearby_label,"local_category":local_category,
+                "ocr_engine":eng,"ocr_dpi":pass_dpi,"ocr_confidence":round(ocr_conf,3),
+                "scanner_confidence":round(scanner_conf,3),
+                "sku_bbox":[round(x1,1),round(y1,1),round(x2,1),round(y2,1)],
+                "price_source":"missing","scanner":"v1.8.10-adaptive-high-intelligence"
+            },ensure_ascii=False)
         })
-    # Adaptive third-level fallback: repeated visual-card anchors (e.g. Size:270*83*41mm)
-    # become review-only product candidates when the supplier printed no usable SKU.
-    fallback_boxes = max(passes, key=lambda p: len(p[2]))[2] if passes else []
-    fallback_shape = max(passes, key=lambda p: len(p[2]))[1].shape if passes else (1,1,3)
-    card_records = _visual_card_fallback(page_num, fallback_boxes, fallback_shape, records, page_heading)
+
+    card_records=_visual_card_fallback(page_num,page_boxes,page_shape,records,page_heading)
     records.extend(card_records)
-    named_price_records = _visual_named_price_fallback(page_num, fallback_boxes, fallback_shape, records, filename=filename, page_heading=page_heading)
+    named_price_records=_visual_named_price_fallback(
+        page_num,page_boxes,page_shape,records,filename=filename,page_heading=page_heading
+    )
     records.extend(named_price_records)
 
-    report = {
-        "sheet": f"PDF p.{page_num}", "source_rows": sum(len(p[2]) for p in passes),
-        "source_columns": 0, "matrix_products": 0, "dimension_products": 0,
-        "row_price_products": 0, "header_products": 0, "pattern_products": 0,
-        "visual_products": len(records), "router_type": "VISUAL_ADAPTIVE",
-        "scan_status": f"adaptive-high-intelligence-{engine_name}-passes{len(passes)}-cards{len(card_records)}-named{len(named_price_records)}",
+    report={
+        "sheet":f"PDF p.{page_num}","source_rows":sum(len(p[2]) for p in passes),"source_columns":0,
+        "matrix_products":0,"dimension_products":0,"row_price_products":0,"header_products":0,"pattern_products":0,
+        "visual_products":len(records),"router_type":"VISUAL_ADAPTIVE",
+        "scan_status":f"adaptive-{engine_name}-passes{len(passes)}-ocrboxes{len(page_boxes)}-cards{len(card_records)}-named{len(named_price_records)}"
     }
-    # Drop large raster references before moving to the next page.
     passes.clear()
-    return records, report
-
-
-# v1.8 Document-Type Safety Gate
-# CatalogFix is a commercial-catalog extractor. Technical datasheets/manuals contain
-# thousands of numeric measurements that must never be mistaken for prices or SKUs.
-_TECH_DOC_HINTS = (
-    "absolute maximum ratings", "electrical characteristics", "typical characteristics",
-    "pin configuration", "pin functions", "package option addendum", "package materials information",
-    "package outline", "example board layout", "example stencil design", "revision history",
-    "thermal information", "recommended operating conditions", "application information",
-    "mechanical, packaging, and orderable information",
-    "绝对最大额定值", "电气特性", "典型特性", "引脚配置", "引脚功能", "封装热阻",
-    "修订历史记录", "机械、封装和可订购信息", "封装和可订购信息",
-)
-_COMMERCIAL_PRICE_HINTS = (
-    "price/pcs", "unit price", "retail price", "wholesale price",
-    "catalogue price", "recommended catalogue price", "sale price", "surcharge",
-    "розничная цена", "оптовая цена",
-    "eur", "usd", "gbp", "pln", "uah", "руб", "₽", "€", "$", "zł",
-)
-
-_STATISTICAL_REPORT_HINTS = (
-    "price and purity", "street purity", "wholesale purity",
-    "drug group", "drug type", "purity type", "source",
-)
+    return records,report
 
 def _document_type_safety_v18(page_texts):
     """Return a conservative document classification from fast extracted text."""
@@ -2346,7 +2317,7 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
     return records
 
 
-# v1.8.9 Order-form / dual-price catalogue parser
+# v1.8.10 Order-form / dual-price catalogue parser
 def _looks_like_item_code_v181(value):
     t=clean_text(value)
     if not t or len(t)>24: return False
@@ -2499,7 +2470,7 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     return records if len(good)>=3 else []
 
 
-# v1.8.9 regression parsers: standard B2B tables, no-SKU price tables,
+# v1.8.10 regression parsers: standard B2B tables, no-SKU price tables,
 # tiered services and vehicle multi-price rows.
 def _parse_price_v183(value):
     t=clean_text(value)
@@ -3421,11 +3392,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.9"
+        and str(manifest.get("version", "")) == "1.8.10"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.9", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.10", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3501,7 +3472,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.9", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.10", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
