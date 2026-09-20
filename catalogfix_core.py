@@ -1810,7 +1810,7 @@ def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records,
             "attributes_json":json.dumps({
                 "supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
                 "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],
-                "scanner":"v1.8.14-image-card"
+                "scanner":"v1.8.15-image-card"
             },ensure_ascii=False)
         })
     return out
@@ -1884,7 +1884,7 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=150):
                 "ocr_engine":eng,"ocr_dpi":pass_dpi,"ocr_confidence":round(ocr_conf,3),
                 "scanner_confidence":round(scanner_conf,3),
                 "sku_bbox":[round(x1,1),round(y1,1),round(x2,1),round(y2,1)],
-                "price_source":"missing","scanner":"v1.8.14-adaptive-high-intelligence"
+                "price_source":"missing","scanner":"v1.8.15-adaptive-high-intelligence"
             },ensure_ascii=False)
         })
 
@@ -2401,7 +2401,7 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
     return records
 
 
-# v1.8.14 Order-form / dual-price catalogue parser
+# v1.8.15 Order-form / dual-price catalogue parser
 
 _BAD_ITEM_WORDS_V181 = {"price","total","note","see","page","item","kit","qty","quantity","terms","handling","tax"}
 
@@ -2498,6 +2498,10 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
         whole=_row_text(ws,0,None)
         if not whole: continue
         n=norm_header(whole)
+        if re.search(r"\btotal prices\b", whole, re.I):
+            break
+        if re.search(r"\b(?:associates incorporated|republic avenue)\b", whole, re.I):
+            continue
         if "item no" in n and "description" in n:
             continue
         # Category rows are short uppercase lines centered around item/description region.
@@ -2578,7 +2582,7 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     return records if len(good)>=3 else []
 
 
-# v1.8.14 regression parsers: standard B2B tables, no-SKU price tables,
+# v1.8.15 regression parsers: standard B2B tables, no-SKU price tables,
 # tiered services and vehicle multi-price rows.
 def _parse_price_v183(value):
     t=clean_text(value)
@@ -3481,7 +3485,7 @@ def smart_import_pdf(
             sample_texts.append("")
     doc_safety=_document_type_safety_v18(sample_texts)
     if doc_safety.get("type") in {"technical-datasheet","statistical-report"}:
-        # v1.8.14 hybrid protection: a sample may look like a datasheet while a real
+        # v1.8.15 hybrid protection: a sample may look like a datasheet while a real
         # price list exists elsewhere. Probe pages one-by-one without retaining text.
         hybrid_commercial_page=None
         for probe_idx in range(total_pages):
@@ -3519,11 +3523,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.14"
+        and str(manifest.get("version", "")) == "1.8.15
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.14", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.15, "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3600,7 +3604,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.14", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.15, "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
