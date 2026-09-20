@@ -1263,12 +1263,18 @@ def extract_row_price_products_from_text(page_text, source_name, filename="", pa
 # -----------------------------
 _VISUAL_CODE_PATTERNS = [
     re.compile(r"\bB\d{4,6}\b", re.I),
-    re.compile(r"\b[A-Z]{1,5}[-_ ]?\d{2,5}[A-Z]?\b", re.I),
+    # Explicit separator: tolerate OCR spacing around '-'/'_' and allow one digit.
+    re.compile(r"\b[A-Z]{1,5}\s*[-_]\s*\d{1,5}[A-Z]?\b", re.I),
+    # Whitespace-only separator remains stricter: at least two digits.
+    re.compile(r"\b[A-Z]{1,5}\s+\d{2,5}[A-Z]?\b", re.I),
+    # Compact codes remain stricter too: at least two digits.
     re.compile(r"\b[A-Z]{2,5}\d{2,5}[A-Z]?\b", re.I),
 ]
 _FALSE_CODE_PREFIXES = {
     "RAL", "NCS", "EUR", "USD", "VAT", "CM", "MM", "KG", "PCS", "PDF", "PAGE",
-    "WWW", "HTTP", "RGB", "PANTONE", "ISO", "DIN"
+    "WWW", "HTTP", "RGB", "PANTONE", "ISO", "DIN",
+    # Common prose/header prefixes that otherwise resemble whitespace SKU forms.
+    "THE", "ITEM", "FIG",
 }
 MATRIX_SECTION_KEYWORDS = (
     "veneer", "colour", "color", "cpl", "hpl", "cardboard",
@@ -1309,16 +1315,15 @@ _GENERIC_VISUAL_HEADINGS = {
 
 def _clean_visual_code(value):
     raw = clean_text(value).upper().replace("_", "-")
-    had_separator = bool(re.search(r"[\s-]", raw))
     text = re.sub(r"\s+", "", raw)
     # Supplier codes are usually PREFIX + digits. One-digit codes are accepted only
-    # when the source visibly separates prefix and number (e.g. MWO-1), which keeps
-    # ordinary words ending in a digit from becoming SKUs.
-    m = re.match(r"^([A-Z]{1,5})-?(\d{1,6}[A-Z]?)$", text)
+    # when an explicit '-'/'_' separator survives normalization (e.g. MWO-1).
+    # Whitespace-only one-digit forms such as "FIG 3" remain rejected.
+    m = re.match(r"^([A-Z]{1,5})(-?)(\d{1,6}[A-Z]?)$", text)
     if m:
-        prefix, digits = m.groups()
+        prefix, sep, digits = m.groups()
         numeric_part = re.match(r"(\d+)", digits).group(1)
-        if len(numeric_part) == 1 and not had_separator:
+        if len(numeric_part) == 1 and not sep:
             return ""
         if prefix in _FALSE_CODE_PREFIXES:
             return ""
