@@ -81,6 +81,8 @@ except Exception as exc:
 try:
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
+    # Coordinates intentionally sit inside the current relative zones used by
+    # extract_order_form_products_v181 (IMSAI regression layout), not a universal A4 grid.
     page.insert_text((45, 55), "IMSAI ORDER FORM", fontsize=12)
     page.insert_text((125, 85), "ITEM NO", fontsize=8)
     page.insert_text((220, 85), "DESCRIPTION", fontsize=8)
