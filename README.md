@@ -49,3 +49,9 @@ When the representative sample looks like a technical datasheet or statistical r
 
 ## Checkpoint compatibility
 Checkpoint manifests are version-gated. Checkpoints created by v1.8.11 are intentionally not reused by v1.8.15 or later; the first run after a processing-version change performs a clean rescan. Resume/reproducibility should therefore be validated with two runs of the same version.
+
+
+## Known limitations / v1.9.x backlog
+- Order-form weak-row suppression currently runs before title repair/final polish. A future v1.9.x cleanup should move or repeat that decision after title normalization so suppression predicates operate on the final title shape.
+- Tighten the pattern-ID / global-product-ID source regex so prose fragments containing mixed letters and digits cannot enter the `pattern-id` route merely because they resemble a compact code.
+- Review the generic `row-price` / compact-code heuristics against additional non-order-form PDFs; malformed text-layer prose can otherwise resemble product identifiers.
