@@ -1,4 +1,4 @@
-name: Package CatalogFix Source
+name: Validate and Package CatalogFix
 
 on:
   push:
@@ -6,23 +6,39 @@ on:
   workflow_dispatch:
 
 jobs:
-  package:
+  validate-package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Smoke test
+        run: python smoke_test.py
+
       - name: Prepare package folder
         run: |
-          mkdir -p CatalogFix_AI_v1_8_10
-          cp app.py CatalogFix_AI_v1_8_10/
-          cp catalogfix_core.py CatalogFix_AI_v1_8_10/
-          cp requirements.txt CatalogFix_AI_v1_8_10/
-          cp README.md CatalogFix_AI_v1_8_10/
-          cp railway.toml CatalogFix_AI_v1_8_10/
-          cp .gitignore CatalogFix_AI_v1_8_10/
-          [ -f demo_messy_catalog.csv ] && cp demo_messy_catalog.csv CatalogFix_AI_v1_8_10/ || true
+          mkdir -p CatalogFix_AI_v1_8_15
+          cp app.py CatalogFix_AI_v1_8_15/
+          cp catalogfix_core.py CatalogFix_AI_v1_8_15/
+          cp smoke_test.py CatalogFix_AI_v1_8_15/
+          cp requirements.txt CatalogFix_AI_v1_8_15/
+          cp README.md CatalogFix_AI_v1_8_15/
+          cp railway.toml CatalogFix_AI_v1_8_15/
+          cp .gitignore CatalogFix_AI_v1_8_15/
+          [ -f demo_messy_catalog.csv ] && cp demo_messy_catalog.csv CatalogFix_AI_v1_8_15/ || true
+
       - name: Upload source ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: CatalogFix_AI_v1_8_10
-          path: CatalogFix_AI_v1_8_10
+          name: CatalogFix_AI_v1_8_15
+          path: CatalogFix_AI_v1_8_15
           if-no-files-found: error
