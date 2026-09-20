@@ -14,8 +14,8 @@ from catalogfix_core import (
     to_excel_bytes,
 )
 
-st.set_page_config(page_title="CatalogFix AI v1.8.11", page_icon="🧹", layout="wide")
-st.title("CatalogFix AI v1.8.11")
+st.set_page_config(page_title="CatalogFix AI v1.8.12", page_icon="🧹", layout="wide")
+st.title("CatalogFix AI v1.8.12")
 st.caption("Hybrid Quality Intelligence: universal routing + visual layout intelligence + context memory + dedupe + sanity checks + QA")
 
 st.info("Hybrid Quality Intelligence is ON: universal page routing + multi-pass visual OCR + page-context category memory + conservative dimension sanity checks + visual duplicate suppression + confidence/QA. Large PDFs autosave and resume after interruption.")
@@ -133,6 +133,10 @@ if name_l.endswith(".pdf"):
         q5.metric("Categories inherited", qs.get("categories_inherited", 0))
         q6.metric("Brands inferred", qs.get("brands_inferred", 0))
         q7.metric("Titles trimmed", qs.get("body_tails_trimmed", 0))
+        if qs.get("invariant_input_output_mismatch"):
+            st.error(f"Quality invariant mismatch: delta={qs.get('invariant_delta', 0)}")
+        else:
+            st.caption("Quality invariant OK: input_rows = output_rows + duplicates_removed")
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Products detected", len(cleaned))
@@ -176,14 +180,14 @@ excel_result = to_excel_bytes(cleaned, issues, shop_ready, needs_review, import_
 st.download_button(
     "Download full result (.xlsx)",
     excel_result,
-    file_name="CatalogFix_Result_v1_8_11.xlsx",
+    file_name="CatalogFix_Result_v1_8_12.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
 st.download_button(
     "Download safe Shopify-ready CSV",
     shop_ready.to_csv(index=False).encode("utf-8-sig"),
-    file_name="Shopify_Ready_v1_8_11.csv",
+    file_name="Shopify_Ready_v1_8_12.csv",
     mime="text/csv",
     disabled=shop_ready.empty,
 )
