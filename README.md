@@ -1,4 +1,4 @@
-# CatalogFix AI v1.8.12 — Hybrid Quality Intelligence
+# CatalogFix AI v1.8.13 — Hybrid Quality Intelligence
 
 CatalogFix converts supplier CSV, Excel and PDF catalogues into a normalized product master, QA report, and safe Shopify-ready export.
 
@@ -48,4 +48,4 @@ The safety gate is heuristic and document-scoped. If a representative sample loo
 When the representative sample looks like a technical datasheet or statistical report, CatalogFix performs a lightweight page-by-page text probe for commercial markers. The probe does not retain page text in memory and stops immediately at the first genuine commercial signal. If no commercial signal is found anywhere in the document, the whole file is rejected before OCR/product extraction.
 
 ## Checkpoint compatibility
-Checkpoint manifests are version-gated. Checkpoints created by v1.8.11 are intentionally not reused by v1.8.12 or later; the first run after a processing-version change performs a clean rescan. Resume/reproducibility should therefore be validated with two runs of the same version.
+Checkpoint manifests are version-gated. Checkpoints created by v1.8.11 are intentionally not reused by v1.8.13 or later; the first run after a processing-version change performs a clean rescan. Resume/reproducibility should therefore be validated with two runs of the same version.
