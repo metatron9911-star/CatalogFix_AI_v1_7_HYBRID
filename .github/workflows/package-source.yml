@@ -41,28 +41,30 @@ jobs:
 
       - name: Prepare package folder
         run: |
-          mkdir -p CatalogFix_AI_v1_8_15
-          cp app.py CatalogFix_AI_v1_8_15/
-          cp catalogfix_core.py CatalogFix_AI_v1_8_15/
-          cp smoke_test.py CatalogFix_AI_v1_8_15/
-          cp requirements.txt CatalogFix_AI_v1_8_15/
-          cp README.md CatalogFix_AI_v1_8_15/
-          cp railway.toml CatalogFix_AI_v1_8_15/
-          cp .gitignore CatalogFix_AI_v1_8_15/
-          [ -f demo_messy_catalog.csv ] && cp demo_messy_catalog.csv CatalogFix_AI_v1_8_15/ || true
           RELEASE_VERSION=$(python -c "import ast; t=ast.parse(open('catalogfix_core.py',encoding='utf-8').read()); print(next(ast.literal_eval(n.value) for n in t.body if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='RELEASE_VERSION' for x in n.targets)))")
           CHECKPOINT_VERSION=$(python -c "import ast; t=ast.parse(open('catalogfix_core.py',encoding='utf-8').read()); print(next(ast.literal_eval(n.value) for n in t.body if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='CHECKPOINT_VERSION' for x in n.targets)))")
+          ARTIFACT_DIR="CatalogFix_AI_v${RELEASE_VERSION//./_}"
+          echo "ARTIFACT_DIR=$ARTIFACT_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$ARTIFACT_DIR"
+          cp app.py "$ARTIFACT_DIR/"
+          cp catalogfix_core.py "$ARTIFACT_DIR/"
+          cp smoke_test.py "$ARTIFACT_DIR/"
+          cp requirements.txt "$ARTIFACT_DIR/"
+          cp README.md "$ARTIFACT_DIR/"
+          cp railway.toml "$ARTIFACT_DIR/"
+          cp .gitignore "$ARTIFACT_DIR/"
+          [ -f demo_messy_catalog.csv ] && cp demo_messy_catalog.csv "$ARTIFACT_DIR/" || true
           {
             echo "GIT_SHA=$GITHUB_SHA"
             echo "RELEASE_VERSION=$RELEASE_VERSION"
             echo "CHECKPOINT_VERSION=$CHECKPOINT_VERSION"
             python --version
             python -m pip freeze | grep -Ei '^(rapidocr|onnxruntime|PyMuPDF|pdfplumber)==' || true
-          } > CatalogFix_AI_v1_8_15/BUILD_INFO.txt
+          } > "$ARTIFACT_DIR/BUILD_INFO.txt"
 
       - name: Upload source ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: CatalogFix_AI_v1_8_15
-          path: CatalogFix_AI_v1_8_15
+          name: ${{ env.ARTIFACT_DIR }}
+          path: ${{ env.ARTIFACT_DIR }}
           if-no-files-found: error
