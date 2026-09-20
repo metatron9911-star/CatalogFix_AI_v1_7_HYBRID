@@ -589,62 +589,56 @@ def _pdf_words_to_raw(page, y_tolerance=3.0, x_gap=18.0):
     return raw
 
 
+
 def _pdf_tables_to_raw(page):
-    """Extract the most useful table grid; prefer text layout over line-art fragments."""
-    settings_candidates = [
-        {
-            "vertical_strategy": "text",
-            "horizontal_strategy": "text",
-            "snap_tolerance": 3,
-            "join_tolerance": 3,
-            "text_tolerance": 2,
-        },
-        {
-            "vertical_strategy": "lines",
-            "horizontal_strategy": "lines",
-            "intersection_tolerance": 5,
-        },
+    """Prefer native table geometry; use text/line grids only as fallback."""
+    def _clean_table(table):
+        if not table: return None
+        width=max(len(r or []) for r in table)
+        if width < 2: return None
+        rows=[]
+        for row in table:
+            cleaned=[clean_text(v) for v in (row or [])]
+            rows.append(cleaned+[""]*(width-len(cleaned)))
+        raw=pd.DataFrame(rows,dtype=object).dropna(axis=1,how="all")
+        if raw.empty: return None
+        raw.columns=range(raw.shape[1])
+        return raw
+    try: native=page.extract_tables() or []
+    except Exception: native=[]
+    native_raw=[x for x in (_clean_table(t) for t in native) if x is not None]
+    if native_raw:
+        widths=[r.shape[1] for r in native_raw]
+        if max(widths)-min(widths) <= 1:
+            target=max(widths); parts=[]
+            for r in native_raw:
+                rr=r.copy().reindex(columns=range(target),fill_value="")
+                parts.append(rr)
+            combo=pd.concat(parts,ignore_index=True)
+            blob=" ".join(clean_text(x).lower() for row in combo.head(12).values.tolist() for x in row)
+            if any(k in blob for k in ["price","mrp","national","retail","assembled"]):
+                return [combo]
+        native_raw.sort(key=lambda r:r.shape[0]*r.shape[1],reverse=True)
+        return native_raw[:20]
+    settings_candidates=[
+        {"vertical_strategy":"text","horizontal_strategy":"text","snap_tolerance":3,"join_tolerance":3,"text_tolerance":2},
+        {"vertical_strategy":"lines","horizontal_strategy":"lines","intersection_tolerance":5},
     ]
-    for strategy_rank, settings in enumerate(settings_candidates):
-        candidates = []
-        try:
-            tables = page.extract_tables(table_settings=settings) or []
-        except Exception:
-            tables = []
+    for rank,settings in enumerate(settings_candidates):
+        candidates=[]
+        try: tables=page.extract_tables(table_settings=settings) or []
+        except Exception: tables=[]
         for table in tables:
-            if not table or len(table) < 2:
-                continue
-            width = max(len(r or []) for r in table)
-            if width < 2:
-                continue
-            rows = []
-            for row in table:
-                row = row or []
-                cleaned = [clean_text(v) for v in row]
-                rows.append(cleaned + [""] * (width - len(cleaned)))
-            raw = pd.DataFrame(rows, dtype=object).dropna(axis=1, how="all")
-            if raw.empty:
-                continue
-            raw.columns = range(raw.shape[1])
-            nonempty = sum(bool(clean_text(x)) for row in raw.values.tolist() for x in row)
-            score = nonempty + raw.shape[0] * 5 + raw.shape[1] * 2
-            candidates.append((score, raw))
+            raw=_clean_table(table)
+            if raw is None or len(raw)<2: continue
+            nonempty=sum(bool(clean_text(x)) for row in raw.values.tolist() for x in row)
+            candidates.append((nonempty+raw.shape[0]*5+raw.shape[1]*2,raw))
         if candidates:
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            best_score, best = candidates[0]
-            # A real text-grid table is overwhelmingly more useful than drawn-line fragments.
-            if strategy_rank == 0 and best.shape[0] >= 8 and best.shape[1] >= 3:
-                return [best]
-            if strategy_rank == 1:
-                return [raw for score, raw in candidates if score >= best_score * 0.65][:3]
+            candidates.sort(key=lambda x:x[0],reverse=True)
+            best_score,best=candidates[0]
+            if rank==0 and best.shape[0]>=8 and best.shape[1]>=3: return [best]
+            if rank==1: return [raw for score,raw in candidates if score>=best_score*.65][:3]
     return []
-
-
-MATRIX_SECTION_KEYWORDS = (
-    "veneer", "colour", "color", "cpl", "hpl", "cardboard", "laminate",
-    "foil", "paint", "glass", "metal", "decor", "surface", "finish",
-)
-
 
 def _letters_only(value):
     return re.sub(r"[^a-z]", "", clean_text(value).lower())
@@ -955,18 +949,20 @@ PRICE_PAGE_HINTS = (
 )
 
 
-def _looks_like_price_page(text):
-    """Cheap first-pass classifier. It never caps page count; it only skips obviously non-price pages."""
-    t = clean_text(text).lower()
-    if not t:
-        return False
-    if any(h in t for h in PRICE_PAGE_HINTS):
-        return True
-    # Generic fallback for foreign-language / unknown supplier price books:
-    # several decimal-like monetary values plus enough text to resemble a table.
-    nums = re.findall(r"(?<!\d)\d{1,5}[,.]\d{1,2}(?!\d)", t)
-    return len(nums) >= 4 and len(t) >= 80
 
+def _looks_like_price_page(text):
+    """Conservative classifier: prose mentioning price/pricing is not a product list."""
+    raw=str(text or ""); t=clean_text(raw).lower()
+    if not t: return False
+    money=re.findall(r"(?:[$€£₽]|\b(?:usd|eur|gbp|pln|uah|zar|inr|aud|cad)\b|(?<![A-Za-z])r(?=\s?\d))\s*\d[\d .,'’]*",raw,re.I)
+    strong=bool(re.search(r"\b(?:price\s*list|pricelist|price\s*book|price\s*guide|pricing\s*schedule|list\s*price|retail\s*price|unit\s*price|mrp|assembled\s*price|kit\s*price)\b",t,re.I))
+    table_price=bool(re.search(r"\b(?:list\s*price|retail\s*price|unit\s*price|mrp|assembled\s*price|kit\s*price|price/uom|base\s*price)\b",t,re.I))
+    code_header=bool(re.search(r"\b(?:item|part|stock|product|support|model|cat(?:alog)?)[ #._-]*(?:no|number|code|#)\b",t,re.I))
+    if money and (strong or len(money)>=2): return True
+    if table_price and code_header:
+        endings=re.findall(r"(?:^|\n).{2,180}?\s\d{1,7}(?:[,.]\d{1,4})?\s*$",raw,re.M)
+        return len(endings)>=2
+    return False
 
 def _generic_page_series(page_text, page_num=None):
     lines = [clean_text(x) for x in (page_text or "").splitlines() if clean_text(x)]
@@ -2342,6 +2338,224 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     # Require a meaningful table, otherwise fall back to generic parsers.
     good=[r for r in records if r.get("price") is not None and _looks_like_item_code_v181(r.get("supplier_code",""))]
     return records if len(good)>=3 else []
+
+
+# v1.8.9 regression parsers: standard B2B tables, no-SKU price tables,
+# tiered services and vehicle multi-price rows.
+def _parse_price_v183(value):
+    t=clean_text(value)
+    if not t: return None
+    t=re.sub(r"(?:USD|EUR|GBP|PLN|UAH|ZAR|INR|AUD|CAD)","",t,flags=re.I)
+    t=re.sub(r"[$€£₽]","",t).strip()
+    t=re.sub(r"^R(?=\s*\d)","",t,flags=re.I).strip()
+    m=re.search(r"[-+]?\d[\d ,.]*\d(?:[.,]\d{1,4})?|[-+]?\d",t)
+    if not m: return None
+    x=m.group(0).replace(" ","")
+    if "," in x and "." in x:
+        if x.rfind(",")<x.rfind("."): x=x.replace(",","")
+        else: x=x.replace(".","").replace(",",".")
+    elif "," in x:
+        tail=x.split(",")[-1]
+        if len(tail)==3: x=x.replace(",","")
+        else: x=x.replace(",",".")
+    try: return float(x)
+    except Exception: return None
+
+def _header_norm_v183(v):
+    return norm_header(clean_text(v).replace("#"," number "))
+
+def extract_standard_commercial_table_v183(raw,source_name,filename="",page_num=None):
+    if raw is None or raw.empty or raw.shape[1]<2: return []
+    rows=[[clean_text(x) for x in raw.iloc[r].tolist()] for r in range(len(raw))]
+    best=None
+    for h in range(min(8,len(rows))):
+        h1=rows[h]; h2=rows[h+1] if h+1<len(rows) else [""]*len(h1)
+        heads=[_header_norm_v183(clean_text(f"{h1[c]} {h2[c] if c<len(h2) else ''}")) for c in range(len(h1))]
+        blob=" | ".join(heads); score=0
+        if any(k in blob for k in ["price","mrp","national","retail","assembled"]): score+=3
+        if any(k in blob for k in ["item number","item no","part no","part number","stock code","vendor part","cat no","support item","product code"]): score+=3
+        if any(k in blob for k in ["description","item name","product name","botanical name"]): score+=2
+        if best is None or score>best[0]: best=(score,h,heads)
+    if not best or best[0]<5:return []
+    _,h,heads=best
+    def first(terms):
+        for c,hd in enumerate(heads):
+            if any(t in hd for t in terms): return c
+        return None
+    sku_col=first(["stock code","vendor part","part no","part number","cat no","support item number","item number","item no","product code"]) 
+    if sku_col is None: sku_col=first(["item"])
+    title_col=first(["product description","item description","support item name","botanical name","description","product name"])
+    brand_col=first(["manufacturer","manuf","oem"]); category_col=first(["category","product category","type"])
+    unit_col=first(["uom","unit"]); qty_col=first(["qty","quantity"]); model_col=first(["model"])
+    dim_col=first(["dimension"]); weight_col=first(["weight"])
+    price_col=None; price_label=""
+    for pref in ["proposed price","assembled price","total otr","total retail","incl vat","retail price","list price","unit price","mrp","price","national","base price"]:
+        for c,hd in enumerate(heads):
+            if pref in hd: price_col=c; price_label=hd; break
+        if price_col is not None: break
+    if sku_col is None or price_col is None:return []
+    if title_col is None:
+        cs=[c for c in range(sku_col+1,price_col) if not any(x in heads[c] for x in ["qty","weight","dimension","gst","model","segment"])]
+        title_col=cs[0] if cs else None
+    if title_col is None:return []
+    stops=[c for c in [price_col,brand_col,category_col,unit_col,qty_col,model_col,dim_col,weight_col] if c is not None and c>title_col]
+    title_end=min(stops) if stops else price_col
+    if title_end<=title_col:title_end=title_col+1
+    flat=" ".join(x for row in rows for x in row)
+    currency="USD" if "$" in flat else "GBP" if "£" in flat else "EUR" if "€" in flat else "ZAR" if re.search(r"(?:^|\s)R\s*\d",flat,re.I) else ""
+    brand_doc=""
+    low=" ".join(x.lower() for row in rows[:10] for x in row)
+    for b in ["Palo Alto Networks","OPTAVIA","UNICO","Cretors","VARROC","IMSAI"]:
+        if b.lower() in low or b.lower() in (filename or "").lower():brand_doc=b
+    out=[]; current_category=""; last=None; start=h+1
+    if start<len(rows):
+        n2=" ".join(_header_norm_v183(x) for x in rows[start])
+        if any(k in n2 for k in ["number","remote","available","vat","price"]):start+=1
+    for rr in range(start,len(rows)):
+        row=rows[rr]; sku=clean_text(row[sku_col]) if sku_col<len(row) else ""
+        if not sku or not re.search(r"[A-Za-z0-9]",sku):
+            for cc in range(max(0,sku_col-2),min(len(row),sku_col+2)):
+                cand=clean_text(row[cc])
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.\-/]{3,35}",cand) and (re.search(r"[_\-/]",cand) or re.search(r"[A-Za-z]",cand)):
+                    sku=cand;break
+        price=_parse_price_v183(row[price_col] if price_col<len(row) else "")
+        full=clean_text(" ".join(row[c] for c in range(title_col,min(title_end,len(row))) if clean_text(row[c])))
+        if sku and price is None and not re.search(r"\d",sku) and len(sku)<=60 and not full:
+            current_category=sku;continue
+        if not sku and last is not None:
+            if full and len(last["description"])<500:last["description"]=clean_text(last["description"]+" "+full)
+            continue
+        if not sku or price is None:continue
+        if sku.isdigit() and len(sku)<4 and "item number" not in heads[sku_col]:continue
+        title=full or sku
+        if len(title)>120:
+            short=re.split(r"[,;]",title,maxsplit=1)[0].strip(); title=short if len(short)>=4 else title[:120].rstrip()
+        brand=clean_text(row[brand_col]) if brand_col is not None and brand_col<len(row) else brand_doc
+        cat=clean_text(row[category_col]) if category_col is not None and category_col<len(row) else current_category
+        attrs={"price_column":price_label}
+        for c,hd in enumerate(heads):
+            if c!=price_col and any(k in hd for k in ["price","national","remote","mrp"]):
+                pv=_parse_price_v183(row[c] if c<len(row) else "")
+                if pv is not None:attrs[hd or f"price_col_{c}"]=pv
+        if unit_col is not None and unit_col<len(row):attrs["unit"]=clean_text(row[unit_col])
+        rec={"sku":sku.upper(),"title":title,"brand":brand,"price":price,"category":cat,"size":"","color":"","description":full or title,
+             "barcode":"","source_sheet":source_name,"source_row":rr+1,"supplier_code":sku,"import_confidence":"HIGH","import_method":"standard-commercial-table",
+             "source_page":page_num or "","source_table":"native-table","matrix_series":cat,"matrix_section":"Commercial table","matrix_model":"","variant_group":sku,
+             "variant_codes":sku,"currency":currency,"vat_note":"","attributes_json":json.dumps(attrs,ensure_ascii=False),"quality_confidence":0.98,"quality_flags":"","category_source":"table" if cat else ""}
+        out.append(rec);last=rec
+    return out if len(out)>=2 else []
+
+def _synthetic_row_sku_v186(*parts):
+    import hashlib
+    base="|".join(clean_text(x) for x in parts if clean_text(x))
+    return "ROW-"+hashlib.sha1(base.encode("utf-8")).hexdigest()[:12].upper()
+
+def extract_named_price_table_v186(raw,source_name,filename="",page_num=None):
+    if raw is None or raw.empty or raw.shape[1]<2:return []
+    rows=[[clean_text(x) for x in raw.iloc[i].tolist()] for i in range(len(raw))]
+    header_i=None;heads=None;name_col=0;price_cols=[];category=""
+    for h in range(min(5,len(rows))):
+        h1=rows[h];h2=rows[h+1] if h+1<len(rows) else [""]*len(h1)
+        hs=[_header_norm_v183(clean_text(f"{h1[c]} {h2[c] if c<len(h2) else ''}")) for c in range(len(h1))]
+        pc=[c for c,hd in enumerate(hs) if any(k in hd for k in ["incl vat","excl vat","total payable","rental rate","retail","price","national","remote"])]
+        nc=next((c for c,hd in enumerate(hs) if any(k in hd for k in ["room type","description","item name","product","service","letter","option"])),0)
+        if pc:header_i=h;heads=hs;name_col=nc;price_cols=pc;break
+    if header_i is None:
+        for c in range(1,raw.shape[1]):
+            vals=[rows[r][c] for r in range(min(len(rows),12))]
+            if sum(_parse_price_v183(v) is not None and bool(re.search(r"[$€£₽]|^R\s*\d",v,re.I)) for v in vals)>=2:price_cols.append(c)
+        if not price_cols:return []
+        header_i=0;heads=[""]*raw.shape[1]
+    chosen=price_cols[0]
+    for pref in ["total payable","incl vat","total retail","retail price","national","list price","rental rate","excl vat"]:
+        m=next((c for c in price_cols if pref in heads[c]),None)
+        if m is not None:chosen=m;break
+    flat=" ".join(x for row in rows for x in row)
+    currency="GBP" if "£" in flat else "USD" if "$" in flat else "EUR" if "€" in flat else "ZAR" if re.search(r"(?:^|\s)R\s*\d",flat,re.I) else "MYR" if "malaysian ringgit" in flat.lower() else ""
+    out=[]
+    for rr in range(header_i+1,len(rows)):
+        row=rows[rr];name=clean_text(row[name_col]) if name_col<len(row) else ""
+        if not name:continue
+        p=_parse_price_v183(row[chosen] if chosen<len(row) else "")
+        if p is None:
+            if len(name)<=60 and not re.search(r"\d{3,}",name):category=name.title()
+            continue
+        if norm_header(name) in {"optional","total","handling","tax","size","price","list price","retail price"}:continue
+        attrs={}
+        for c in price_cols:
+            pv=_parse_price_v183(row[c] if c<len(row) else "")
+            if pv is not None:attrs[heads[c] or f"price_col_{c}"]=pv
+        sku=_synthetic_row_sku_v186(filename,page_num,category,name)
+        out.append({"sku":sku,"title":name,"brand":"","price":p,"category":category,"size":"","color":"","description":name,"barcode":"",
+          "source_sheet":source_name,"source_row":rr+1,"supplier_code":"","import_confidence":"MEDIUM","import_method":"named-price-table","source_page":page_num or "",
+          "source_table":"native-table","matrix_series":category,"matrix_section":"Named price table","matrix_model":"","variant_group":name,"variant_codes":"",
+          "currency":currency,"vat_note":"","attributes_json":json.dumps(attrs,ensure_ascii=False),"quality_confidence":0.78,
+          "quality_flags":"supplier_sku_missing","category_source":"table-heading" if category else ""})
+    return out if len(out)>=2 else []
+
+def extract_tiered_service_table_v186(raw,source_name,filename="",page_num=None):
+    if raw is None or raw.empty or raw.shape[1]<4:return []
+    rows=[[clean_text(x) for x in raw.iloc[i].tolist()] for i in range(len(raw))]
+    header=None
+    for h in range(min(4,len(rows))):
+        hs=[_header_norm_v183(x) for x in rows[h]]
+        if any("product code" in x for x in hs) and sum(1 for x in rows[h] if re.search(r"\d.*[-+]",x))>=1:header=(h,hs);break
+    if not header:return []
+    h,hs=header;code_col=next(i for i,x in enumerate(hs) if "product code" in x)
+    tier_cols=[c for c in range(code_col+1,len(hs)) if any(re.fullmatch(r"\d+(?:\.\d+)?p",clean_text(rows[r][c]),re.I) for r in range(h+1,len(rows)) if c<len(rows[r]))]
+    if not tier_cols:return []
+    title_cols=list(range(0,code_col));prev=[""]*code_col;out=[]
+    for rr in range(h+1,len(rows)):
+        row=rows[rr];code=clean_text(row[code_col]) if code_col<len(row) else ""
+        if not re.fullmatch(r"[A-Z0-9]{2,8}",code,re.I):continue
+        parts=[]
+        for c in title_cols:
+            v=clean_text(row[c]) if c<len(row) else ""
+            if v:prev[c]=v
+            if prev[c]:parts.append(prev[c])
+        title=clean_text(" ".join(parts)) or code;attrs={}
+        for c in tier_cols:
+            m=re.fullmatch(r"(\d+(?:\.\d+)?)p",clean_text(row[c]),re.I)
+            if m:attrs[hs[c] or f"tier_{c}"]=float(m.group(1))/100
+        key=hs[tier_cols[0]] or f"tier_{tier_cols[0]}";price=attrs.get(key)
+        out.append({"sku":code.upper(),"title":title,"brand":"Royal Mail" if "royal" in (filename or "").lower() else "","price":price,"category":"Mail service",
+          "size":"","color":"","description":title,"barcode":"","source_sheet":source_name,"source_row":rr+1,"supplier_code":code,"import_confidence":"HIGH",
+          "import_method":"standard-commercial-table","source_page":page_num or "","source_table":"tiered-service","matrix_series":"Mail service","matrix_section":"Tiered price",
+          "matrix_model":"","variant_group":code,"variant_codes":code,"currency":"GBP","vat_note":"","attributes_json":json.dumps(attrs,ensure_ascii=False),
+          "quality_confidence":0.98,"quality_flags":"","category_source":"service-table"})
+    return out if len(out)>=2 else []
+
+def extract_vehicle_price_v186(page_text,source_name,filename="",page_num=None):
+    raw=str(page_text or "");low=clean_text(raw).lower()
+    if not ("total" in low and "price" in low and ("otr" in low or "retail" in low) and "£" in raw):return []
+    recs=[]
+    for line_no,line in enumerate(raw.splitlines(),1):
+        line=clean_text(line);monies=list(re.finditer(r"£\s*([0-9][0-9,]*(?:\.\d{1,2})?)",line))
+        if len(monies)<3:continue
+        vals=[_parse_price_v183(m.group(0)) for m in monies]
+        prefix=clean_text(line[:monies[0].start()])
+        mcode=re.match(r"(.+?)\s+([A-Z0-9][A-Z0-9.\-]{2,20})\s+\d+(?:\s+\d+){0,3}$",prefix,re.I)
+        if mcode:title,code=clean_text(mcode.group(1)),mcode.group(2)
+        else:
+            mo=re.match(r"(.+?)\s+([A-Z][A-Z0-9]{1,6})$",prefix)
+            if not mo:continue
+            title,code=clean_text(mo.group(1)),mo.group(2)
+        if code.lower() in {"total","vat","basic","price","otr","retail","charges"} or len(title)<3:continue
+        attrs={"basic_price":vals[0],"vat":vals[1],"total_retail":vals[2]}
+        if len(vals)>3:attrs["otr_charges"]=vals[3]
+        if len(vals)>4:attrs["total_otr"]=vals[4]
+        price=attrs.get("total_otr") or attrs.get("total_retail") or vals[0]
+        category="Vehicle option" if "options" in low and len(vals)==3 else "Vehicle"
+        recs.append({"sku":code.upper(),"title":title,"brand":"Fiat" if "fiat" in low or "fiat" in (filename or "").lower() else "","price":price,"category":category,
+          "size":"","color":"","description":title,"barcode":"","source_sheet":source_name,"source_row":line_no,"supplier_code":code,"import_confidence":"HIGH",
+          "import_method":"vehicle-price-row","source_page":page_num or "","source_table":"vehicle-price","matrix_series":category,"matrix_section":"Model price","matrix_model":code,
+          "variant_group":title,"variant_codes":code,"currency":"GBP","vat_note":"VAT included in total retail/OTR","attributes_json":json.dumps(attrs,ensure_ascii=False),
+          "quality_confidence":0.98,"quality_flags":"","category_source":"vehicle-price"})
+    seen=set();out=[]
+    for r in recs:
+        if r["sku"] not in seen:seen.add(r["sku"]);out.append(r)
+    return out
+
 
 def _parse_pdf_page_v13(page, page_num, page_text, filename=""):
     """Parse one PDF page using the v1.3 detection stack."""
