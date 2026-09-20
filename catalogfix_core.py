@@ -1611,6 +1611,80 @@ def _visual_card_fallback(page_num, boxes, image_shape, existing_records, page_h
         })
     return out
 
+
+def _visual_price_value(text):
+    t=clean_text(text).replace("₹","").replace("/-","").strip()
+    if not t:return None
+    m=re.search(r"(?:[$€£₹]|\b(?:USD|EUR|GBP|INR|ZAR|RM|R)\b)?\s*([0-9][0-9 ,.]{0,16}[0-9])",t,re.I)
+    if not m:return None
+    raw=re.sub(r"\s+","",m.group(1))
+    if raw.count(",")>=1 and "." not in raw:
+        parts=raw.split(",")
+        if len(parts)>2 or (len(parts)==2 and len(parts[-1])==3):raw="".join(parts)
+        else:raw=raw.replace(",",".")
+    else:raw=raw.replace(",","")
+    try:
+        v=float(raw);return v if 0<v<1e9 else None
+    except Exception:return None
+
+def _visual_named_price_fallback(page_num,boxes,image_shape,existing_records,filename="",page_heading=""):
+    """Review-only recovery for image-only brochure cards with name + literal Price."""
+    if existing_records or not boxes:return []
+    h,w=image_shape[:2];pairs=[]
+    for label in boxes:
+        if not re.fullmatch(r"price[:：]?",clean_text(label.get("text","")),re.I):continue
+        lx,ly=_bbox_center(label["bbox"]);cand=[]
+        for b in boxes:
+            if b is label:continue
+            bx,by=_bbox_center(b["bbox"])
+            if bx<=lx or bx-lx>.22*w or abs(by-ly)>.035*h:continue
+            rawp=clean_text(b.get("text",""))
+            if not re.search(r"(?:/-|[$€£₹]|\d[, ]\d{3}|\d{4,})",rawp):continue
+            val=_visual_price_value(rawp)
+            if val is not None:cand.append((abs(by-ly)+.12*abs(bx-lx),b,val))
+        if cand:
+            cand.sort(key=lambda z:z[0]);_,pb,val=cand[0];pairs.append((label,pb,val))
+    if not pairs:return []
+    bad=re.compile(r"\b(material|width|control|speed|motor|lighting|filter|outlet|model|size|power|airflow|sensor|heat|type|upto|yes|no|touch|gesture|suction|collector|body|glass|silent|panel|white|black|silver|red|grey|gray)\b",re.I)
+    out=[];used=set()
+    for label,pb,price in pairs:
+        lx,ly=_bbox_center(label["bbox"]);same=[]
+        for other,_,_ in pairs:
+            ox,oy=_bbox_center(other["bbox"])
+            if oy<ly and abs(ox-lx)<.08*w:same.append(oy)
+        lower=max(same) if same else -1;expected_x=lx-.235*w;cands=[]
+        for b in boxes:
+            text=clean_text(b.get("text",""));bx,by=_bbox_center(b["bbox"])
+            if not (lower+.035*h<by<ly-.03*h):continue
+            if abs(bx-expected_x)>.13*w or len(text)<3 or len(text)>40 or bad.search(text):continue
+            words=re.findall(r"[A-Za-z][A-Za-z'-]*",text);letters="".join(words)
+            if not words or len(words)>5 or len(letters)<4:continue
+            if text.strip().upper() in {"CARYSIL","ORIFLAME","FIAT","IMSAI","ROCA","PRICE","CEILING HOOD","ISLAND HOOD","BUILT-IN HOOD"}:continue
+            if not (text[:1].isupper() or text.isupper()):continue
+            if _visual_codes_from_text(text) or _visual_price_value(text) is not None:continue
+            score=(by-lower if lower>=0 else by)/max(h,1)+.35*abs(bx-expected_x)/max(w,1)-.03*float(b.get("score",0) or 0)
+            cands.append((score,text,b))
+        if not cands:continue
+        cands.sort(key=lambda z:z[0]);title=cands[0][1].strip(" .:-")
+        key=(title.lower(),round(price,2))
+        if key in used:continue
+        used.add(key)
+        import hashlib
+        local_id="ROW-"+hashlib.sha1(f"{page_num}|{title}|{price}".encode("utf-8")).hexdigest()[:12].upper()
+        joined=" ".join(clean_text(b.get("text","")) for b in boxes[:100]);brand=""
+        for known in ("CARYSIL","ORIFLAME","FIAT","IMSAI","ROCA"):
+            if known.lower() in joined.lower() or known.lower() in (filename or "").lower():brand=known.title();break
+        cat=page_heading if page_heading and page_heading!="Visual Catalog" else "Visual Catalog"
+        out.append({"sku":local_id,"title":title,"brand":brand,"price":price,"category":cat,"size":"","color":"",
+          "description":title,"barcode":"","source_sheet":f"PDF p.{page_num}","source_row":page_num,"supplier_code":"",
+          "import_confidence":"MEDIUM","import_method":"visual-named-price-card","source_page":page_num,
+          "source_table":"visual-price-card","matrix_series":cat,"matrix_section":"Image-only price card","matrix_model":"",
+          "variant_group":title,"variant_codes":"","currency":"","vat_note":"","visual_confidence":round(float(label.get("score",0) or .5),3),
+          "router_type":"VISUAL_ADAPTIVE","quality_flags":"supplier_sku_missing","category_source":"visual-card",
+          "attributes_json":json.dumps({"supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
+             "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],"scanner":"v1.8.9-image-card"},ensure_ascii=False)})
+    return out
+
 def extract_visual_catalog_products(doc, page_num, filename="", dpi=140):
     """v1.6 High Intelligence Scanner: multi-pass OCR + geometry-aware product association."""
     passes = []
@@ -1690,13 +1764,15 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=140):
     fallback_shape = max(passes, key=lambda p: len(p[2]))[1].shape if passes else (1,1,3)
     card_records = _visual_card_fallback(page_num, fallback_boxes, fallback_shape, records, page_heading)
     records.extend(card_records)
+    named_price_records = _visual_named_price_fallback(page_num, fallback_boxes, fallback_shape, records, filename=filename, page_heading=page_heading)
+    records.extend(named_price_records)
 
     report = {
         "sheet": f"PDF p.{page_num}", "source_rows": sum(len(p[2]) for p in passes),
         "source_columns": 0, "matrix_products": 0, "dimension_products": 0,
         "row_price_products": 0, "header_products": 0, "pattern_products": 0,
         "visual_products": len(records), "router_type": "VISUAL_ADAPTIVE",
-        "scan_status": f"adaptive-high-intelligence-{engine_name}-passes{len(passes)}-cards{len(card_records)}",
+        "scan_status": f"adaptive-high-intelligence-{engine_name}-passes{len(passes)}-cards{len(card_records)}-named{len(named_price_records)}",
     }
     # Drop large raster references before moving to the next page.
     passes.clear()
