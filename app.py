@@ -14,8 +14,8 @@ from catalogfix_core import (
     to_excel_bytes,
 )
 
-st.set_page_config(page_title="CatalogFix AI v1.8.1", page_icon="🧹", layout="wide")
-st.title("CatalogFix AI v1.8.1")
+st.set_page_config(page_title="CatalogFix AI v1.8.9.9", page_icon="🧹", layout="wide")
+st.title("CatalogFix AI v1.8.9.9")
 st.caption("Hybrid Quality Intelligence: universal routing + visual layout intelligence + context memory + dedupe + sanity checks + QA")
 
 st.info("Hybrid Quality Intelligence is ON: universal page routing + multi-pass visual OCR + page-context category memory + conservative dimension sanity checks + visual duplicate suppression + confidence/QA. Large PDFs autosave and resume after interruption.")
@@ -90,9 +90,13 @@ except Exception as exc:
     st.stop()
 
 if imported.empty:
-    if name_l.endswith(".pdf") and (pdf_meta or {}).get("document_type") == "technical-datasheet":
-        st.warning("Technical datasheet / engineering manual detected. CatalogFix intentionally created 0 product rows because no commercial price catalog was found.")
-        st.caption(f"Pages checked: {pdf_meta.get('total_pages', 0)} • safety gate: technical-datasheet")
+    if name_l.endswith(".pdf") and (pdf_meta or {}).get("document_type") in {"technical-datasheet","statistical-report"}:
+        dtype=(pdf_meta or {}).get("document_type")
+        if dtype=="technical-datasheet":
+            st.warning("Technical datasheet / engineering manual detected. CatalogFix intentionally created 0 product rows because no commercial price catalog was found.")
+        else:
+            st.warning("Statistical / analytical price report detected. CatalogFix intentionally created 0 product rows because this is not a supplier product catalogue.")
+        st.caption(f"Pages checked: {pdf_meta.get('total_pages', 0)} • safety gate: {dtype}")
         st.dataframe(import_report, use_container_width=True)
         st.stop()
     st.error("No product-like rows were detected. This file needs another importer rule.")
@@ -168,14 +172,14 @@ excel_result = to_excel_bytes(cleaned, issues, shop_ready, needs_review, import_
 st.download_button(
     "Download full result (.xlsx)",
     excel_result,
-    file_name="CatalogFix_Result_v1_8_1.xlsx",
+    file_name="CatalogFix_Result_v1_8_9.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
 st.download_button(
     "Download safe Shopify-ready CSV",
     shop_ready.to_csv(index=False).encode("utf-8-sig"),
-    file_name="Shopify_Ready_v1_8_1.csv",
+    file_name="Shopify_Ready_v1_8_9.csv",
     mime="text/csv",
     disabled=shop_ready.empty,
 )
