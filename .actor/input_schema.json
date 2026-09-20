@@ -1,0 +1,22 @@
+{
+  "title": "CatalogFix AI input",
+  "description": "Upload one supplier PDF, Excel or CSV catalog. CatalogFix separates confident rows from review-only rows and never invents a missing supplier SKU.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "catalogFile": {
+      "title": "Supplier catalog",
+      "type": "string",
+      "description": "Upload a PDF, CSV, XLSX or XLS file, or provide a direct HTTP(S) URL.",
+      "editor": "fileupload"
+    },
+    "filenameOverride": {
+      "title": "Filename override (optional)",
+      "type": "string",
+      "description": "Use only when the uploaded URL does not preserve a file extension. Example: supplier_catalog.pdf",
+      "editor": "textfield"
+    }
+  },
+  "required": ["catalogFile"],
+  "additionalProperties": false
+}
