@@ -14,7 +14,7 @@ import os
 import time
 from pypdf import PdfReader
 
-RELEASE_VERSION = "1.8.15"
+RELEASE_VERSION = "1.9.0"
 CHECKPOINT_VERSION = "pdf-pipeline-v8"
 
 try:
