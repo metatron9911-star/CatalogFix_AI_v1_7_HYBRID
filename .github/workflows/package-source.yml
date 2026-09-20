@@ -1,0 +1,28 @@
+name: Package CatalogFix Source
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare package folder
+        run: |
+          mkdir -p CatalogFix_AI_v1_8_10
+          cp app.py CatalogFix_AI_v1_8_10/
+          cp catalogfix_core.py CatalogFix_AI_v1_8_10/
+          cp requirements.txt CatalogFix_AI_v1_8_10/
+          cp README.md CatalogFix_AI_v1_8_10/
+          cp railway.toml CatalogFix_AI_v1_8_10/
+          cp .gitignore CatalogFix_AI_v1_8_10/
+          [ -f demo_messy_catalog.csv ] && cp demo_messy_catalog.csv CatalogFix_AI_v1_8_10/ || true
+      - name: Upload source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: CatalogFix_AI_v1_8_10
+          path: CatalogFix_AI_v1_8_10
+          if-no-files-found: error
