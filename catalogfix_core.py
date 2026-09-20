@@ -1810,7 +1810,7 @@ def _visual_named_price_fallback(page_num, boxes, image_shape, existing_records,
             "attributes_json":json.dumps({
                 "supplier_sku_missing":True,"generated_candidate_id":local_id,"ocr_price":price,
                 "review_required":True,"price_bbox":[round(x,1) for x in pb["bbox"]],
-                "scanner":"v1.8.13-image-card"
+                "scanner":"v1.8.14-image-card"
             },ensure_ascii=False)
         })
     return out
@@ -1884,7 +1884,7 @@ def extract_visual_catalog_products(doc, page_num, filename="", dpi=150):
                 "ocr_engine":eng,"ocr_dpi":pass_dpi,"ocr_confidence":round(ocr_conf,3),
                 "scanner_confidence":round(scanner_conf,3),
                 "sku_bbox":[round(x1,1),round(y1,1),round(x2,1),round(y2,1)],
-                "price_source":"missing","scanner":"v1.8.13-adaptive-high-intelligence"
+                "price_source":"missing","scanner":"v1.8.14-adaptive-high-intelligence"
             },ensure_ascii=False)
         })
 
@@ -1926,20 +1926,33 @@ def _document_type_safety_v18(page_texts):
     return {"type":"catalog-or-unknown","technical_hits":tech_hits,"commercial_hits":commercial_hits,"statistical_hits":stat_hits}
 
 
+
 def _page_has_commercial_signal_v19(text):
-    """Fast boolean probe used only to protect hybrid datasheet+price PDFs from whole-document rejection."""
+    """Conservative second-stage probe for hybrid datasheet+catalog PDFs."""
     raw=str(text or "")
     low=raw.lower()
     if not low.strip():
         return False
-    if any(h.lower() in low for h in _COMMERCIAL_PRICE_HINTS):
+
+    strong_phrases=(
+        "price list","pricelist","order form","unit price","retail price","list price",
+        "kit price","assembled price","price/uom","quotation","recommended catalogue price"
+    )
+    if any(p in low for p in strong_phrases):
         return True
-    if re.search(r"(?:[$€£₽₹]|\b(?:usd|eur|gbp|pln|uah|inr|zar|aud|cad)\b)\s*\d", raw, re.I):
+
+    code_header=bool(re.search(r"\b(?:item|part|stock|product|support)\s*(?:no|number|code|#)\b", low, re.I))
+    price_header=bool(re.search(r"\b(?:unit|list|retail|assembled|kit|base)\s+price\b", low, re.I))
+    if code_header and price_header:
         return True
-    if re.search(r"\b(?:item|part|stock|product|support)\s*(?:no|number|code|#)\b", low, re.I) and \
-       re.search(r"\b(?:unit|list|retail|assembled|kit)\s+price\b", low, re.I):
-        return True
-    return False
+
+    money_tokens=re.findall(
+        r"(?:[$€£₽₹]\s*\d[\d ,.]*|\d[\d ,.]*\s*(?:USD|EUR|GBP|PLN|UAH|INR|ZAR|AUD|CAD)\b)",
+        raw,re.I
+    )
+    commercial_context=bool(re.search(r"\b(?:order|catalog(?:ue)?|product|item|sku|qty|quantity|discount)\b", low,re.I))
+    # One stray currency value in a legal footnote is not enough.
+    return len(money_tokens) >= 2 and commercial_context
 
 def classify_pdf_page_text(text):
     """Cheap routing decision used before heavy parsing."""
@@ -2388,26 +2401,34 @@ def extract_product_card_products_from_text(page_text, source_name, filename="",
     return records
 
 
-# v1.8.13 Order-form / dual-price catalogue parser
+# v1.8.14 Order-form / dual-price catalogue parser
 
 _BAD_ITEM_WORDS_V181 = {"price","total","note","see","page","item","kit","qty","quantity","terms","handling","tax"}
+
+
+_BAD_ITEM_WORDS_V181 = {
+    "price","total","note","see","page","item","item no","item number","kit",
+    "qty","quantity","terms","handling","tax","description","assembled"
+}
 
 def _looks_like_item_code_v181(value):
     t=clean_text(value)
     if not t or len(t)>24:
         return False
-    low=t.lower().strip(" .:-")
+    low=norm_header(t)
     if low in _BAD_ITEM_WORDS_V181:
         return False
-    if re.search(r"\b(?:price|description|qty|quantity|total|handling|tax|terms|note|page)\b", t, re.I):
-        return False
-    # Order-form supplier codes should carry at least one digit. This prevents prose
-    # like "See note" from being promoted to a real catalogue identifier.
-    if not re.search(r"\d", t):
+    if re.search(r"\b(?:price|description|qty|quantity|total|handling|tax|terms|note|page|see)\b", t, re.I):
         return False
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ./\-]{0,22}", t):
         return False
-    return len(t.split()) <= 4
+    if len(t.split()) > 4:
+        return False
+    if re.search(r"\d", t):
+        return True
+    # Legacy catalogues can use genuine all-letter supplier codes (FIF, FDC, LIF, PSM, RM).
+    compact=re.sub(r"[^A-Za-z]","",t)
+    return bool(re.fullmatch(r"[A-Z]{2,8}", compact))
 
 def extract_order_form_products_v181(page, page_text, source_name, filename="", page_num=None):
     """Parse catalogue/order-form pages with ITEM NO + DESCRIPTION + KIT/ASSEMBLED prices.
@@ -2418,7 +2439,9 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     """
     t=clean_text(page_text)
     low=t.lower()
-    if not ("item no" in low and "description" in low and ("assembled" in low or "kit" in low) and "price" in low):
+    strong_header=("item no" in low and "description" in low and ("assembled" in low or "kit" in low) and "price" in low)
+    legacy_order_form=("item no" in low and "description" in low and "order form" in low and len(re.findall(r"\$\s*\d", page_text or "")) >= 6)
+    if not (strong_header or legacy_order_form):
         return []
     try:
         words=page.extract_words(x_tolerance=1.5, y_tolerance=2.5, keep_blank_chars=False)
@@ -2475,6 +2498,8 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
         whole=_row_text(ws,0,None)
         if not whole: continue
         n=norm_header(whole)
+        if "item no" in n and "description" in n:
+            continue
         # Category rows are short uppercase lines centered around item/description region.
         if re.fullmatch(r"[A-Z0-9 /&\-]{4,45}", whole) and not re.search(r"\$", whole) and            not any(k in n for k in ["item no","description","price","qty","total","terms"]):
             # Only accept obvious section headings.
@@ -2553,7 +2578,7 @@ def extract_order_form_products_v181(page, page_text, source_name, filename="", 
     return records if len(good)>=3 else []
 
 
-# v1.8.13 regression parsers: standard B2B tables, no-SKU price tables,
+# v1.8.14 regression parsers: standard B2B tables, no-SKU price tables,
 # tiered services and vehicle multi-price rows.
 def _parse_price_v183(value):
     t=clean_text(value)
@@ -3456,7 +3481,7 @@ def smart_import_pdf(
             sample_texts.append("")
     doc_safety=_document_type_safety_v18(sample_texts)
     if doc_safety.get("type") in {"technical-datasheet","statistical-report"}:
-        # v1.8.13 hybrid protection: a sample may look like a datasheet while a real
+        # v1.8.14 hybrid protection: a sample may look like a datasheet while a real
         # price list exists elsewhere. Probe pages one-by-one without retaining text.
         hybrid_commercial_page=None
         for probe_idx in range(total_pages):
@@ -3494,11 +3519,11 @@ def smart_import_pdf(
         manifest.get("job_id") == job_id
         and manifest.get("total_pages") == total_pages
         and int(manifest.get("chunk_size", chunk_size)) == chunk_size
-        and str(manifest.get("version", "")) == "1.8.13"
+        and str(manifest.get("version", "")) == "1.8.14"
     )
     if not valid_manifest:
         manifest = {
-            "version": "1.8.13", "job_id": job_id, "filename": filename, "file_size": len(data),
+            "version": "1.8.14", "job_id": job_id, "filename": filename, "file_size": len(data),
             "total_pages": total_pages, "chunk_size": chunk_size, "scan_completed_through": 0,
             "scan_complete": False, "page_routes": {}, "completed_chunks": [],
         }
@@ -3575,7 +3600,7 @@ def smart_import_pdf(
                         "router_type":route,"scan_status":"skipped-no-product-signal"})
 
             _save_gzip_json_atomic(job_dir / f"chunk_{chunk_key}.json.gz", {
-                "version":"1.8.13", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
+                "version":"1.8.14", "job_id":job_id, "chunk_start":chunk_start, "chunk_end":chunk_end,
                 "records":chunk_records, "report":chunk_report,
             })
             completed_chunks.add(chunk_key)
