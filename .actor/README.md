@@ -94,6 +94,17 @@ In the TL972 technical-datasheet test, CatalogFix intentionally returned zero pr
 5. Quality gates separate Ready rows from review-only rows.
 6. Download the structured dataset and audit files.
 
+## Pricing
+
+CatalogFix uses **pay per event** with one charge per completed run:
+
+- **Up to 50 pages:** $4.90
+- **51–200 pages:** $12.90
+- **201–500 pages:** $24.90
+- **Technical/statistical non-catalog screening:** $1.00
+
+The current self-service Store version accepts PDFs up to **500 pages**. Larger catalogs should be split or handled as a managed/custom run.
+
 ## Notes and limitations
 
 - OCR-heavy PDFs take longer than text-based catalogs.
