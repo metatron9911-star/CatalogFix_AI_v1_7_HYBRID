@@ -200,6 +200,30 @@ def _execute_queue_command(command):
         code, data, _ = _apify(f"/actor-runs/{run_id}/abort", method="POST", body={})
         return action, _brief_apify_result(action, code, data)
 
+    if action == "run-records":
+        run_id = _safe_run_id(str(command.get("runId", "")))
+        if not run_id:
+            raise ValueError("valid runId is required")
+        code, run, _ = _apify(f"/actor-runs/{run_id}")
+        if code != 200:
+            return action, {"httpStatus": code}
+        dataset_id = (run.get("data") or {}).get("defaultDatasetId")
+        if not dataset_id:
+            return action, {"httpStatus": 404, "error": "run has no dataset"}
+        limit = min(max(int(command.get("limit", 200)), 1), 500)
+        code, payload, _ = _apify(f"/datasets/{dataset_id}/items?clean=1&format=json&limit={limit}")
+        if isinstance(payload, bytes):
+            payload = json.loads(payload.decode("utf-8") or "[]")
+        skus = {str(x).upper() for x in (command.get("skus") or [])}
+        rows = payload if isinstance(payload, list) else []
+        if skus:
+            rows = [r for r in rows if str(r.get("sku", "")).upper() in skus]
+        safe = []
+        keep = {"sku","title","price","category","brand","qa_status","quality_confidence","quality_flags","visual_confidence","import_method","supplier_code","currency","recordType","source_page","source_row"}
+        for r in rows[:100]:
+            safe.append({k:r.get(k) for k in keep if k in r})
+        return action, {"httpStatus": code, "rows": safe}
+
     if action == "run-log-tail":
         run_id = _safe_run_id(str(command.get("runId", "")))
         if not run_id:
@@ -229,7 +253,7 @@ def _execute_queue_command(command):
                 summary = {"raw": summary.decode("utf-8", "replace")[:2000]}
         return action, {"httpStatus": code, "summary": summary}
 
-    raise ValueError("unsupported action; allowed: status, build, build-status, run, run-status, run-log-tail, run-summary, abort")
+    raise ValueError("unsupported action; allowed: status, build, build-status, run, run-status, run-records, run-log-tail, run-summary, abort")
 
 
 def _set_state(**kwargs):
