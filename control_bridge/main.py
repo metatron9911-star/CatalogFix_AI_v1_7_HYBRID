@@ -122,7 +122,7 @@ def _brief_apify_result(action, code, payload):
                 "modifiedAt": data.get("modifiedAt"),
             },
         }
-    if action == "build":
+    if action in {"build", "build-status"}:
         return {
             "httpStatus": code,
             "build": {
@@ -131,6 +131,7 @@ def _brief_apify_result(action, code, payload):
                 "buildNumber": data.get("buildNumber"),
                 "versionNumber": data.get("versionNumber"),
                 "startedAt": data.get("startedAt"),
+                "finishedAt": data.get("finishedAt"),
             },
         }
     if action in {"run", "abort"}:
@@ -165,6 +166,13 @@ def _execute_queue_command(command):
         code, data, _ = _apify(f"/acts/{ACTOR_ID}/builds?{query}", method="POST", body={})
         return action, _brief_apify_result(action, code, data)
 
+    if action == "build-status":
+        build_id = _safe_run_id(str(command.get("buildId", "")))
+        if not build_id:
+            raise ValueError("valid buildId is required")
+        code, data, _ = _apify(f"/actor-builds/{build_id}")
+        return action, _brief_apify_result(action, code, data)
+
     if action == "run":
         actor_input = _safe_public_catalog_input(command)
         opts = {}
@@ -185,7 +193,7 @@ def _execute_queue_command(command):
         code, data, _ = _apify(f"/actor-runs/{run_id}/abort", method="POST", body={})
         return action, _brief_apify_result(action, code, data)
 
-    raise ValueError("unsupported action; allowed: status, build, run, abort")
+    raise ValueError("unsupported action; allowed: status, build, build-status, run, abort")
 
 
 def _set_state(**kwargs):
