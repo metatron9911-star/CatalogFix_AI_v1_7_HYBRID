@@ -200,6 +200,17 @@ def _execute_queue_command(command):
         code, data, _ = _apify(f"/actor-runs/{run_id}/abort", method="POST", body={})
         return action, _brief_apify_result(action, code, data)
 
+    if action == "run-log-tail":
+        run_id = _safe_run_id(str(command.get("runId", "")))
+        if not run_id:
+            raise ValueError("valid runId is required")
+        code, logs, _ = _apify(f"/logs/{run_id}")
+        if isinstance(logs, bytes):
+            text_logs = logs.decode("utf-8", "replace")
+        else:
+            text_logs = json.dumps(logs, ensure_ascii=False, default=str)
+        return action, {"httpStatus": code, "tail": text_logs[-5000:]}
+
     if action == "run-summary":
         run_id = _safe_run_id(str(command.get("runId", "")))
         if not run_id:
@@ -218,7 +229,7 @@ def _execute_queue_command(command):
                 summary = {"raw": summary.decode("utf-8", "replace")[:2000]}
         return action, {"httpStatus": code, "summary": summary}
 
-    raise ValueError("unsupported action; allowed: status, build, build-status, run, run-status, run-summary, abort")
+    raise ValueError("unsupported action; allowed: status, build, build-status, run, run-status, run-log-tail, run-summary, abort")
 
 
 def _set_state(**kwargs):
