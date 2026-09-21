@@ -160,7 +160,7 @@ def _execute_queue_command(command):
         return action, _brief_apify_result(action, code, data)
 
     if action == "actor-update":
-        allowed = {"title", "description", "seoTitle", "seoDescription", "categories", "actorPermissionLevel", "defaultRunOptions", "exampleRunInput"}
+        allowed = {"title", "description", "seoTitle", "seoDescription", "categories", "actorPermissionLevel", "defaultRunOptions", "exampleRunInput", "pricingInfos", "isPublic"}
         payload = {k: v for k, v in command.items() if k in allowed}
         if not payload:
             raise ValueError("no allowed Actor fields supplied")
