@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 from apify import Actor
+from pypdf import PdfReader
 
 from catalogfix_core import (
     CANONICAL_FIELDS,
@@ -24,6 +25,33 @@ from catalogfix_core import (
 
 _ALLOWED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls"}
 
+
+
+def _catalog_size_tier(data: bytes, filename: str) -> tuple[str, int | None]:
+    """Return billing tier and PDF page count when applicable."""
+    if filename.lower().endswith(".pdf"):
+        pages = len(PdfReader(io.BytesIO(data)).pages)
+        if pages > 500:
+            raise ValueError(
+                f"This Store version supports PDF catalogs up to 500 pages; received {pages}. "
+                "Split the catalog or contact the provider for a managed run."
+            )
+        if pages <= 50:
+            return "catalog-small", pages
+        if pages <= 200:
+            return "catalog-medium", pages
+        return "catalog-large", pages
+    return "catalog-small", None
+
+
+async def _charge_if_ppe(event_name: str) -> None:
+    """Charge only when this Actor is currently running under PPE pricing."""
+    try:
+        pricing = Actor.get_charging_manager().get_pricing_info()
+        if getattr(pricing, "is_pay_per_event", False):
+            await Actor.charge(event_name=event_name)
+    except Exception as exc:
+        Actor.log.warning("PPE charge skipped/failed safely: %s", exc)
 
 def _download_input(source: str, filename_hint: str = "") -> tuple[bytes, str]:
     source = str(source or "").strip()
@@ -142,7 +170,10 @@ async def main() -> None:
 
         Actor.log.info("CatalogFix AI v%s starting", RELEASE_VERSION)
         data, filename = _download_input(source, filename_hint)
+        billing_event, page_count = _catalog_size_tier(data, filename)
         Actor.log.info("Input file: %s (%d bytes)", filename, len(data))
+        if page_count is not None:
+            Actor.log.info("PDF pages: %d; billing tier: %s", page_count, billing_event)
 
         imported, import_report, pdf_meta, mapping, import_mode = _import_catalog(data, filename)
 
@@ -164,6 +195,8 @@ async def main() -> None:
                     if document_type == "statistical-report"
                     else "no-product-rows"
                 ),
+                "pageCount": page_count,
+                "billingTier": "catalog-screening" if document_type in {"technical-datasheet", "statistical-report"} else billing_event,
                 "message": (
                     "CatalogFix intentionally created 0 product rows because the file "
                     "was classified as a non-catalog document."
@@ -174,6 +207,8 @@ async def main() -> None:
             await Actor.set_value("SUMMARY.json", summary, content_type="application/json")
             await Actor.set_value("IMPORT_REPORT.json", _records(import_report), content_type="application/json")
             await Actor.push_data({"recordType": "summary", **summary})
+            charge_event = "catalog-screening" if document_type in {"technical-datasheet", "statistical-report"} else billing_event
+            await _charge_if_ppe(charge_event)
             await Actor.set_status_message(
                 f"Finished: {summary['status']} — 0 product rows",
                 is_terminal=True,
@@ -207,6 +242,8 @@ async def main() -> None:
             "issueRows": int(len(issues)),
             "mappedFields": int(len(mapping)),
             "qualityStats": quality_stats,
+            "pageCount": page_count,
+            "billingTier": billing_event,
             "status": "completed",
             "outputs": {
                 "workbookKey": "RESULT.xlsx",
@@ -223,6 +260,7 @@ async def main() -> None:
         if dataset_rows:
             await Actor.push_data(dataset_rows)
 
+        await _charge_if_ppe(billing_event)
         await Actor.set_status_message(
             f"Finished: {len(cleaned)} rows, {len(shop_ready)} Ready, {len(needs_review)} Review",
             is_terminal=True,
