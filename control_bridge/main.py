@@ -194,55 +194,40 @@ def _set_state(**kwargs):
         _control_state["updatedAt"] = _now_iso()
 
 
-def _command_poller():
-    """Poll a public, secret-free command file in the GitHub repo.
+def _startup_command():
+    """Execute the checked-in command once at container start.
 
-    The command file contains only safe control instructions; secrets remain in Railway.
-    A command id is executed at most once per bridge process.
+    Updating control_bridge/command.json triggers a fresh Railway deployment for
+    this service, so no external polling or secret-bearing client is required.
     """
-    last_id = None
-    _set_state(ready=True, lastMessage="Bridge ready; polling command file.")
-    while True:
-        try:
-            url = CONTROL_COMMAND_URL + "?ts=" + str(int(time.time()))
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "CatalogFix-Control/1.2",
-                "Cache-Control": "no-cache",
-            })
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                command = json.loads(resp.read().decode("utf-8") or "{}")
-            command_id = str(command.get("id") or "").strip()
-            if command_id and command_id != last_id:
-                last_id = command_id
-                try:
-                    action, result = _execute_queue_command(command)
-                    _set_state(
-                        lastCommentId=command_id,
-                        lastCommand=action,
-                        lastStatus="OK",
-                        lastMessage="Command completed",
-                        queuePollWarning=None,
-                        queuePollWarningAt=None,
-                        result=result,
-                    )
-                except Exception as exc:
-                    _set_state(
-                        lastCommentId=command_id,
-                        lastCommand=str(command.get("action") or "") or None,
-                        lastStatus="ERROR",
-                        lastMessage=f"{type(exc).__name__}: {str(exc)[:500]}",
-                        result=None,
-                    )
-        except Exception as exc:
-            _set_state(
-                queuePollWarning=f"Command-file poll failed: {type(exc).__name__}",
-                queuePollWarningAt=_now_iso(),
-            )
-        time.sleep(CONTROL_POLL_SECONDS)
+    path = os.path.join(os.path.dirname(__file__), "command.json")
+    _set_state(ready=True, lastMessage="Bridge ready; loading startup command.")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            command = json.load(fh)
+        command_id = str(command.get("id") or "").strip()
+        if not command_id:
+            return
+        action, result = _execute_queue_command(command)
+        _set_state(
+            lastCommentId=command_id,
+            lastCommand=action,
+            lastStatus="OK",
+            lastMessage="Command completed",
+            queuePollWarning=None,
+            queuePollWarningAt=None,
+            result=result,
+        )
+    except Exception as exc:
+        _set_state(
+            lastStatus="ERROR",
+            lastMessage=f"{type(exc).__name__}: {str(exc)[:500]}",
+            result=None,
+        )
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CatalogFixControl/1.2"
+    server_version = "CatalogFixControl/1.3"
 
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
@@ -399,7 +384,7 @@ if __name__ == "__main__":
         raise SystemExit("APIFY_TOKEN is required")
     if not CONTROL_API_KEY:
         raise SystemExit("CONTROL_API_KEY is required")
-    threading.Thread(target=_command_poller, name="github-control-queue", daemon=True).start()
+    _startup_command()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"CatalogFix Apify control listening on :{PORT} for actor {ACTOR_ID}", flush=True)
     server.serve_forever()
