@@ -134,7 +134,7 @@ def _brief_apify_result(action, code, payload):
                 "finishedAt": data.get("finishedAt"),
             },
         }
-    if action in {"run", "abort"}:
+    if action in {"run", "run-status", "abort"}:
         return {
             "httpStatus": code,
             "run": {
@@ -173,6 +173,13 @@ def _execute_queue_command(command):
         code, data, _ = _apify(f"/actor-builds/{build_id}")
         return action, _brief_apify_result(action, code, data)
 
+    if action == "run-status":
+        run_id = _safe_run_id(str(command.get("runId", "")))
+        if not run_id:
+            raise ValueError("valid runId is required")
+        code, data, _ = _apify(f"/actor-runs/{run_id}")
+        return action, _brief_apify_result(action, code, data)
+
     if action == "run":
         actor_input = _safe_public_catalog_input(command)
         opts = {}
@@ -193,7 +200,25 @@ def _execute_queue_command(command):
         code, data, _ = _apify(f"/actor-runs/{run_id}/abort", method="POST", body={})
         return action, _brief_apify_result(action, code, data)
 
-    raise ValueError("unsupported action; allowed: status, build, build-status, run, abort")
+    if action == "run-summary":
+        run_id = _safe_run_id(str(command.get("runId", "")))
+        if not run_id:
+            raise ValueError("valid runId is required")
+        code, run, _ = _apify(f"/actor-runs/{run_id}")
+        if code != 200:
+            return action, {"httpStatus": code}
+        kv_id = (run.get("data") or {}).get("defaultKeyValueStoreId")
+        if not kv_id:
+            return action, {"httpStatus": 404, "error": "run has no key-value store"}
+        code, summary, _ = _apify(f"/key-value-stores/{kv_id}/records/SUMMARY.json")
+        if isinstance(summary, bytes):
+            try:
+                summary = json.loads(summary.decode("utf-8"))
+            except Exception:
+                summary = {"raw": summary.decode("utf-8", "replace")[:2000]}
+        return action, {"httpStatus": code, "summary": summary}
+
+    raise ValueError("unsupported action; allowed: status, build, build-status, run, run-status, run-summary, abort")
 
 
 def _set_state(**kwargs):
