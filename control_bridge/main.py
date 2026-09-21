@@ -22,7 +22,8 @@ CONTROL_REPO = os.environ.get("CONTROL_REPO", "metatron9911-star/catalogfix-ai")
 CONTROL_ISSUE = int(os.environ.get("CONTROL_ISSUE", "1"))
 CONTROL_OWNER = os.environ.get("CONTROL_OWNER", "metatron9911-star")
 CONTROL_PREFIX = "CATALOGFIX_CONTROL "
-COMMAND_MAX_AGE_SECONDS = 300
+COMMAND_MAX_AGE_SECONDS = 900
+CONTROL_POLL_SECONDS = 90
 
 _state_lock = threading.Lock()
 _control_state = {
@@ -31,6 +32,8 @@ _control_state = {
     "lastCommand": None,
     "lastStatus": None,
     "lastMessage": "Bridge started; waiting for control queue.",
+    "queuePollWarning": None,
+    "queuePollWarningAt": None,
     "updatedAt": None,
 }
 
@@ -196,7 +199,10 @@ def _command_poller():
         baseline = max((int(c.get("id", 0)) for c in comments), default=0)
     except Exception as exc:
         baseline = 0
-        _set_state(lastStatus="ERROR", lastMessage=f"Queue initialization failed: {type(exc).__name__}")
+        _set_state(
+            queuePollWarning=f"Queue initialization failed: {type(exc).__name__}",
+            queuePollWarningAt=_now_iso(),
+        )
     _set_state(ready=True, lastCommentId=baseline)
 
     seen = baseline
@@ -240,9 +246,19 @@ def _command_poller():
                         lastMessage=f"{type(exc).__name__}: {str(exc)[:500]}",
                         result=None,
                     )
+        except urllib.error.HTTPError as exc:
+            # GitHub unauthenticated API is rate-limited. A transient queue-poll
+            # failure must not overwrite the status/result of the last Apify command.
+            _set_state(
+                queuePollWarning=f"GitHub queue poll HTTP {exc.code}",
+                queuePollWarningAt=_now_iso(),
+            )
         except Exception as exc:
-            _set_state(lastStatus="ERROR", lastMessage=f"Queue poll failed: {type(exc).__name__}")
-        time.sleep(5)
+            _set_state(
+                queuePollWarning=f"Queue poll failed: {type(exc).__name__}",
+                queuePollWarningAt=_now_iso(),
+            )
+        time.sleep(CONTROL_POLL_SECONDS)
 
 
 class Handler(BaseHTTPRequestHandler):
