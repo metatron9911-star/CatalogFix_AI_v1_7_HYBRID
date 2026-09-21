@@ -222,7 +222,6 @@ async def main() -> None:
             dataset_rows.append(row)
         if dataset_rows:
             await Actor.push_data(dataset_rows)
-        await Actor.push_data({"recordType": "summary", **summary})
 
         await Actor.set_status_message(
             f"Finished: {len(cleaned)} rows, {len(shop_ready)} Ready, {len(needs_review)} Review",
