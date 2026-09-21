@@ -1,5 +1,18 @@
 {
-  "id": "run-summary-20260921-2054",
-  "action": "run-summary",
-  "runId": "lzIVqx5qEHBzxIqfd"
+  "id": "run-records-20260921-2134",
+  "action": "run-records",
+  "runId": "lzIVqx5qEHBzxIqfd",
+  "skus": [
+    "DW-01",
+    "DW-02",
+    "DW-03",
+    "DW-04",
+    "MWO-1",
+    "MWO-2",
+    "FSCR01",
+    "BIO-01",
+    "CW-165",
+    "CW-46"
+  ],
+  "limit": 300
 }
