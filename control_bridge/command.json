@@ -1,11 +1,5 @@
 {
-  "id": "store-smoke-run-20260921-2210",
-  "action": "run",
-  "build": "latest",
-  "memory": 4096,
-  "timeout": 600,
-  "input": {
-    "catalogFile": "https://raw.githubusercontent.com/metatron9911-star/catalogfix-ai/main/fixtures/store_smoke.csv",
-    "filenameOverride": "store_smoke.csv"
-  }
+  "id": "store-smoke-status-20260921-2212",
+  "action": "run-status",
+  "runId": "kUkiN8yeTCYoK22Xk"
 }
