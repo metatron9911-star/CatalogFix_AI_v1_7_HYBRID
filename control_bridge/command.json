@@ -1,5 +1,9 @@
 {
-  "id": "build-final-status-20260921-2310",
-  "action": "build-status",
-  "buildId": "b9B2zoOWBKKUymhZ3"
+  "id": "publish-store-20260921-2312",
+  "action": "actor-update",
+  "isPublic": true,
+  "exampleRunInput": {
+    "body": "{\"catalogFile\":\"https://raw.githubusercontent.com/metatron9911-star/catalogfix-ai/main/fixtures/store_smoke.csv\",\"filenameOverride\":\"store_smoke.csv\"}",
+    "contentType": "application/json; charset=utf-8"
+  }
 }
