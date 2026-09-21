@@ -120,6 +120,11 @@ def _brief_apify_result(action, code, payload):
                 "title": data.get("title"),
                 "username": data.get("username"),
                 "modifiedAt": data.get("modifiedAt"),
+                "isPublic": data.get("isPublic"),
+                "isStoreActor": data.get("isStoreActor"),
+                "pricingInfos": data.get("pricingInfos"),
+                "defaultRunOptions": data.get("defaultRunOptions"),
+                "categories": data.get("categories"),
             },
         }
     if action in {"build", "build-status"}:
