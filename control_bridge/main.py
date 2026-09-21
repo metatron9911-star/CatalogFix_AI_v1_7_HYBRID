@@ -154,6 +154,14 @@ def _execute_queue_command(command):
         code, data, _ = _apify(f"/acts/{ACTOR_ID}")
         return action, _brief_apify_result(action, code, data)
 
+    if action == "actor-update":
+        allowed = {"title", "description", "seoTitle", "seoDescription", "categories", "actorPermissionLevel", "defaultRunOptions", "exampleRunInput"}
+        payload = {k: v for k, v in command.items() if k in allowed}
+        if not payload:
+            raise ValueError("no allowed Actor fields supplied")
+        code, data, _ = _apify(f"/acts/{ACTOR_ID}", method="PUT", body=payload)
+        return action, _brief_apify_result("status", code, data)
+
     if action == "build":
         version = str(command.get("version") or "0.0")
         tag = str(command.get("tag") or "latest")
@@ -253,7 +261,7 @@ def _execute_queue_command(command):
                 summary = {"raw": summary.decode("utf-8", "replace")[:2000]}
         return action, {"httpStatus": code, "summary": summary}
 
-    raise ValueError("unsupported action; allowed: status, build, build-status, run, run-status, run-records, run-log-tail, run-summary, abort")
+    raise ValueError("unsupported action; allowed: status, actor-update, build, build-status, run, run-status, run-records, run-log-tail, run-summary, abort")
 
 
 def _set_state(**kwargs):
