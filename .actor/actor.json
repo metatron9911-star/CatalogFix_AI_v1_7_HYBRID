@@ -1,12 +1,15 @@
 {
   "actorSpecification": 1,
   "name": "catalogfix-ai",
-  "title": "CatalogFix AI — Safe Supplier Catalog Parser",
+  "title": "CatalogFix AI — Supplier Catalog Parser",
   "version": "1.9",
   "buildTag": "latest",
   "dockerfile": "./Dockerfile",
   "readme": "./README.md",
   "input": "./input_schema.json",
   "output": "./output_schema.json",
-  "defaultMemoryMbytes": 4096
+  "defaultMemoryMbytes": 4096,
+  "storages": {
+    "dataset": "./dataset_schema.json"
+  }
 }
