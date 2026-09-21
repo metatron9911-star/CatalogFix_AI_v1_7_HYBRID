@@ -1,9 +1,12 @@
 import json
 import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -14,6 +17,27 @@ CONTROL_API_KEY = os.environ.get("CONTROL_API_KEY", "")
 PORT = int(os.environ.get("PORT", "8080"))
 MAX_BODY_BYTES = 25 * 1024 * 1024
 
+# Public GitHub issue used as a secret-free command bus.
+CONTROL_REPO = os.environ.get("CONTROL_REPO", "metatron9911-star/catalogfix-ai")
+CONTROL_ISSUE = int(os.environ.get("CONTROL_ISSUE", "1"))
+CONTROL_OWNER = os.environ.get("CONTROL_OWNER", "metatron9911-star")
+CONTROL_PREFIX = "CATALOGFIX_CONTROL "
+COMMAND_MAX_AGE_SECONDS = 300
+
+_state_lock = threading.Lock()
+_control_state = {
+    "ready": False,
+    "lastCommentId": None,
+    "lastCommand": None,
+    "lastStatus": None,
+    "lastMessage": "Bridge started; waiting for control queue.",
+    "updatedAt": None,
+}
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
 
 def _apify(path, method="GET", body=None, content_type="application/json"):
     if not APIFY_TOKEN:
@@ -21,7 +45,7 @@ def _apify(path, method="GET", body=None, content_type="application/json"):
     data = None
     headers = {
         "Authorization": f"Bearer {APIFY_TOKEN}",
-        "User-Agent": "CatalogFix-Control/1.0",
+        "User-Agent": "CatalogFix-Control/1.1",
     }
     if body is not None:
         if isinstance(body, (dict, list)):
@@ -51,15 +75,180 @@ def _apify(path, method="GET", body=None, content_type="application/json"):
         return exc.code, payload, ctype
 
 
+def _github_comments():
+    owner, repo = CONTROL_REPO.split("/", 1)
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{CONTROL_ISSUE}/comments?per_page=100"
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "CatalogFix-Control/1.1",
+    })
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8") or "[]")
+
+
 def _safe_run_id(value):
     return value if re.fullmatch(r"[A-Za-z0-9_-]{8,80}", value or "") else None
 
 
+def _safe_public_catalog_input(payload):
+    actor_input = payload.get("input", payload)
+    if not isinstance(actor_input, dict):
+        raise ValueError("run input must be a JSON object")
+    source = actor_input.get("catalogFile")
+    if source:
+        parsed = urllib.parse.urlparse(str(source))
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("catalogFile must be a public HTTP(S) URL for issue-queue runs")
+        # The GitHub issue queue is public. Never allow signed/private URLs here.
+        if parsed.query or parsed.fragment or "token" in str(source).lower():
+            raise ValueError("private/signed catalog URLs are not allowed in the public control queue")
+    return actor_input
+
+
+def _brief_apify_result(action, code, payload):
+    data = payload.get("data", payload) if isinstance(payload, dict) else {}
+    if action == "status":
+        return {
+            "httpStatus": code,
+            "actor": {
+                "id": data.get("id"),
+                "name": data.get("name"),
+                "title": data.get("title"),
+                "username": data.get("username"),
+                "modifiedAt": data.get("modifiedAt"),
+            },
+        }
+    if action == "build":
+        return {
+            "httpStatus": code,
+            "build": {
+                "id": data.get("id"),
+                "status": data.get("status"),
+                "buildNumber": data.get("buildNumber"),
+                "versionNumber": data.get("versionNumber"),
+                "startedAt": data.get("startedAt"),
+            },
+        }
+    if action in {"run", "abort"}:
+        return {
+            "httpStatus": code,
+            "run": {
+                "id": data.get("id"),
+                "status": data.get("status"),
+                "startedAt": data.get("startedAt"),
+                "finishedAt": data.get("finishedAt"),
+                "buildNumber": data.get("buildNumber"),
+            },
+        }
+    return {"httpStatus": code}
+
+
+def _execute_queue_command(command):
+    action = str(command.get("action", "")).lower().strip()
+    if action == "status":
+        code, data, _ = _apify(f"/acts/{ACTOR_ID}")
+        return action, _brief_apify_result(action, code, data)
+
+    if action == "build":
+        version = str(command.get("version") or "0.0")
+        tag = str(command.get("tag") or "latest")
+        query = urllib.parse.urlencode({
+            "version": version,
+            "tag": tag,
+            "useCache": "1" if command.get("useCache", True) else "0",
+            "waitForFinish": 0,
+        })
+        code, data, _ = _apify(f"/acts/{ACTOR_ID}/builds?{query}", method="POST", body={})
+        return action, _brief_apify_result(action, code, data)
+
+    if action == "run":
+        actor_input = _safe_public_catalog_input(command)
+        opts = {}
+        if "memory" in command:
+            opts["memory"] = int(command["memory"])
+        if "timeout" in command:
+            opts["timeout"] = int(command["timeout"])
+        if "build" in command:
+            opts["build"] = str(command["build"])
+        suffix = ("?" + urllib.parse.urlencode(opts)) if opts else ""
+        code, data, _ = _apify(f"/acts/{ACTOR_ID}/runs{suffix}", method="POST", body=actor_input)
+        return action, _brief_apify_result(action, code, data)
+
+    if action == "abort":
+        run_id = _safe_run_id(str(command.get("runId", "")))
+        if not run_id:
+            raise ValueError("valid runId is required")
+        code, data, _ = _apify(f"/actor-runs/{run_id}/abort", method="POST", body={})
+        return action, _brief_apify_result(action, code, data)
+
+    raise ValueError("unsupported action; allowed: status, build, run, abort")
+
+
+def _set_state(**kwargs):
+    with _state_lock:
+        _control_state.update(kwargs)
+        _control_state["updatedAt"] = _now_iso()
+
+
+def _command_poller():
+    try:
+        comments = _github_comments()
+        baseline = max((int(c.get("id", 0)) for c in comments), default=0)
+    except Exception as exc:
+        baseline = 0
+        _set_state(lastStatus="ERROR", lastMessage=f"Queue initialization failed: {type(exc).__name__}")
+    _set_state(ready=True, lastCommentId=baseline)
+
+    seen = baseline
+    while True:
+        try:
+            comments = _github_comments()
+            candidates = []
+            now = datetime.now(timezone.utc)
+            for c in comments:
+                cid = int(c.get("id", 0))
+                if cid <= seen:
+                    continue
+                user = (c.get("user") or {}).get("login")
+                body = str(c.get("body") or "")
+                if user != CONTROL_OWNER or not body.startswith(CONTROL_PREFIX):
+                    seen = max(seen, cid)
+                    continue
+                created = datetime.fromisoformat(str(c.get("created_at")).replace("Z", "+00:00"))
+                if (now - created).total_seconds() > COMMAND_MAX_AGE_SECONDS:
+                    seen = max(seen, cid)
+                    continue
+                candidates.append((cid, body[len(CONTROL_PREFIX):].strip()))
+
+            for cid, raw_command in sorted(candidates):
+                seen = max(seen, cid)
+                try:
+                    command = json.loads(raw_command)
+                    action, result = _execute_queue_command(command)
+                    _set_state(
+                        lastCommentId=cid,
+                        lastCommand=action,
+                        lastStatus="OK",
+                        lastMessage="Command completed",
+                        result=result,
+                    )
+                except Exception as exc:
+                    _set_state(
+                        lastCommentId=cid,
+                        lastCommand=None,
+                        lastStatus="ERROR",
+                        lastMessage=f"{type(exc).__name__}: {str(exc)[:500]}",
+                        result=None,
+                    )
+        except Exception as exc:
+            _set_state(lastStatus="ERROR", lastMessage=f"Queue poll failed: {type(exc).__name__}")
+        time.sleep(5)
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CatalogFixControl/1.0"
+    server_version = "CatalogFixControl/1.1"
 
     def log_message(self, fmt, *args):
-        # Do not log Authorization headers or secrets.
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
     def _json(self, status, payload):
@@ -108,7 +297,13 @@ class Handler(BaseHTTPRequestHandler):
                 "actorId": ACTOR_ID,
                 "apifyTokenConfigured": bool(APIFY_TOKEN),
                 "controlKeyConfigured": bool(CONTROL_API_KEY),
+                "queueReady": bool(_control_state.get("ready")),
             })
+
+        if path == "/control-status":
+            with _state_lock:
+                public_state = dict(_control_state)
+            return self._json(200, public_state)
 
         if not self._authorized():
             return
@@ -161,13 +356,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-
         if not self._authorized():
             return
 
         if path == "/v1/build":
             payload = self._body_json()
-            version = str(payload.get("version") or "1.9")
+            version = str(payload.get("version") or "0.0")
             tag = str(payload.get("tag") or "latest")
             use_cache = "1" if payload.get("useCache", True) else "0"
             query = urllib.parse.urlencode({
@@ -209,6 +403,7 @@ if __name__ == "__main__":
         raise SystemExit("APIFY_TOKEN is required")
     if not CONTROL_API_KEY:
         raise SystemExit("CONTROL_API_KEY is required")
+    threading.Thread(target=_command_poller, name="github-control-queue", daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"CatalogFix Apify control listening on :{PORT} for actor {ACTOR_ID}", flush=True)
     server.serve_forever()
