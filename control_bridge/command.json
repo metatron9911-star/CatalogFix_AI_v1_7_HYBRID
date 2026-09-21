@@ -1,5 +1,5 @@
 {
-  "id": "store-smoke-status-20260921-2212",
-  "action": "run-status",
+  "id": "store-smoke-log-20260921-2214",
+  "action": "run-log-tail",
   "runId": "kUkiN8yeTCYoK22Xk"
 }
