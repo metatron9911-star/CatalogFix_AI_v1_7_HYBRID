@@ -6,7 +6,7 @@
     "productRows": {
       "type": "string",
       "title": "Product rows and run summary",
-      "description": "Normalized rows with source and quality context plus one summary record.",
+      "description": "Normalized product rows with source and quality context. Run summary is stored separately in SUMMARY.json.",
       "template": "{{links.apiDefaultDatasetUrl}}/items"
     },
     "resultWorkbook": {
