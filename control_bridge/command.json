@@ -1,5 +1,10 @@
 {
-  "id": "store-smoke-summary-20260921-2223",
-  "action": "run-summary",
-  "runId": "qBl5Z6id9dTmPPxqV"
+  "id": "store-smoke-records-20260921-2225",
+  "action": "run-records",
+  "runId": "qBl5Z6id9dTmPPxqV",
+  "skus": [
+    "CFX-001",
+    "CFX-002"
+  ],
+  "limit": 20
 }
