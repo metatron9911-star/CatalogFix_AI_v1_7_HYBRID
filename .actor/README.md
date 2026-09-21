@@ -1,64 +1,106 @@
-# CatalogFix AI — Safe Supplier Catalog Parser
+# CatalogFix AI — Supplier Catalog to Clean Product Data
 
 **Clean supplier catalogs. Nothing invented, nothing guessed.**
 
-CatalogFix AI converts supplier PDF, Excel and CSV files into normalized product data with an explicit **Ready / Needs Review** split.
+CatalogFix AI converts messy supplier PDFs, Excel files, and CSVs into structured product data with a clear **Ready / Needs Review** split.
 
-The core principle is simple: **missing supplier data is flagged, not fabricated.** If a supplier SKU is not printed in the source, CatalogFix keeps that row review-only instead of creating a fake supplier code.
+It is built for one thing most extraction tools handle badly: **uncertainty**.
 
-## What this Actor does
+If a supplier SKU is not printed or cannot be verified, CatalogFix does not fabricate one. If a file is a technical datasheet rather than a product catalog, CatalogFix can intentionally return zero product rows instead of turning technical references into fake products.
 
-1. Accepts one PDF, CSV, XLSX or XLS catalog.
-2. Routes PDF pages by content type and runs OCR only where needed.
-3. Extracts structured and visual product records.
-4. Applies quality gates and keeps source/audit context on every extracted row.
-5. Returns structured Dataset rows plus downloadable audit files.
+## Best for
 
-## Outputs
+- supplier catalogs that need to become e-commerce product data;
+- image-only PDF catalogs that require OCR;
+- mixed catalogs with printed and unprinted supplier codes;
+- price lists and order forms;
+- teams that need an audit trail instead of a black-box extraction.
 
-- **RESULT.xlsx** — full five-sheet workbook: Clean Master, Issues Found, Shopify Ready, Needs Review, Import Report.
-- **SHOPIFY_READY.csv** — rows that passed the current release gates.
-- **SUMMARY.json** — run counts and quality statistics.
-- **IMPORT_REPORT.json** — routing and parsing audit information.
-- **Dataset** — normalized product rows with source/quality context.
+## What you get
+
+Every successful catalog run can produce:
+
+- **RESULT.xlsx** — full workbook with Clean Master, Issues Found, Shopify Ready, Needs Review, and Import Report;
+- **SHOPIFY_READY.csv** — only rows that passed the current release gates;
+- **SUMMARY.json** — counts, document type, and quality statistics;
+- **IMPORT_REPORT.json** — page/sheet routing and parsing audit;
+- **Dataset** — normalized product rows with source and quality context.
+
+## Ready vs Review
+
+CatalogFix does not treat every extracted row as equally trustworthy.
+
+### Ready
+
+A row is placed in **Ready** only when it passes the current release gates, including required product fields and quality checks.
+
+### Needs Review
+
+A row is placed in **Needs Review** when something important is uncertain, for example:
+
+- supplier SKU is missing or not confidently verified;
+- OCR confidence is low;
+- title or product-card boundaries are uncertain;
+- required commercial data such as price is missing.
+
+This means a run can legitimately return **zero Ready rows** while still extracting useful product candidates. That is intentional behavior, not a failure.
 
 ## Safety behavior
 
-CatalogFix is designed to prefer an explicit review state over false certainty.
+CatalogFix prefers an explicit review state over false certainty.
 
 - Missing supplier SKUs are not invented.
-- Internal candidate IDs remain review-only.
-- Technical datasheets can be rejected with zero product rows instead of turning technical identifiers into products.
-- Visual OCR keeps source location and confidence metadata for auditability.
-- Structured price sources preserve price provenance where the parser has it.
+- Internal candidate IDs stay review-only.
+- Technical datasheets can be rejected with zero product rows.
+- Visual OCR keeps source location and confidence metadata.
+- Structured price sources preserve price provenance where available.
+- Quality gates keep uncertain records out of Shopify Ready.
 
 **Knowing when not to extract is part of the product.**
 
 ## Input
 
-Use the file-upload field to upload a supplier catalog or provide a direct URL.
+Upload one supplier catalog per run.
 
-Supported formats: PDF, CSV, XLSX, XLS.
+Supported formats:
 
-For URLs that do not end in a recognizable extension, set **Filename override**.
+- PDF
+- CSV
+- XLSX
+- XLS
 
-## Example behavior
+You can also provide a direct HTTP(S) URL.
 
-For an image-heavy supplier catalog, CatalogFix can recover printed supplier codes while keeping uncoded product cards in Needs Review.
+For URLs that do not preserve a recognizable file extension, use **Filename override**.
 
-For a technical datasheet, CatalogFix can intentionally return zero product rows with status **skipped-technical-datasheet**, instead of generating product records from engineering references.
+## Verified release behavior
+
+CatalogFix AI **v1.9.0** was regression-tested across:
+
+- image-only visual catalogs;
+- structured dual-price order forms;
+- technical datasheet refusal.
+
+In the image-only Appliances test, the Actor successfully ran RapidOCR on Apify, extracted structured product rows, preserved verified supplier codes such as `DW-01`, `MWO-1`, `FSCR01`, `BIO-01`, `CW-165`, and `CW-46`, and kept uncertain rows in Review.
+
+In the TL972 technical-datasheet test, CatalogFix intentionally returned zero products with a technical-datasheet skip status.
+
+## How it works
+
+1. Upload a catalog.
+2. CatalogFix classifies the document and routes pages by content type.
+3. Structured parsers handle commercial tables and order forms where possible.
+4. Visual pages use adaptive OCR.
+5. Quality gates separate Ready rows from review-only rows.
+6. Download the structured dataset and audit files.
+
+## Notes and limitations
+
+- OCR-heavy PDFs take longer than text-based catalogs.
+- A second OCR pass may be triggered when the first pass is not reliable enough.
+- A real supplier SKU can still remain in Needs Review if other required fields are missing.
+- CatalogFix does not promise perfect extraction. It makes uncertainty explicit and auditable.
 
 ## Current release
 
-CatalogFix AI **v1.9.0**.
-
-The current release includes adaptive visual OCR, structured commercial table and order-form parsing, Ready / Review quality gates, supplier-SKU-missing protection, a document-level technical-datasheet safety gate, and retained source/audit context.
-
-## Notes
-
-Processing time depends primarily on PDF page count and whether OCR is required. Image-heavy PDFs may trigger a second OCR pass on pages where the first pass does not provide enough commercial signal.
-
-CatalogFix does not promise perfect extraction. It makes uncertainty explicit and keeps ambiguous rows out of Ready.
-
-
-Deployment source: GitHub main branch.
+**CatalogFix AI v1.9.0**
