@@ -1,7 +1,4 @@
 {
-  "id": "build-ppe-20260921-2155",
-  "action": "build",
-  "version": "0.0",
-  "tag": "latest",
-  "useCache": true
+  "id": "store-status-20260921-2201",
+  "action": "status"
 }
