@@ -23,7 +23,8 @@ CONTROL_ISSUE = int(os.environ.get("CONTROL_ISSUE", "1"))
 CONTROL_OWNER = os.environ.get("CONTROL_OWNER", "metatron9911-star")
 CONTROL_PREFIX = "CATALOGFIX_CONTROL "
 COMMAND_MAX_AGE_SECONDS = 900
-CONTROL_POLL_SECONDS = 90
+CONTROL_POLL_SECONDS = 15
+CONTROL_COMMAND_URL = f"https://raw.githubusercontent.com/{CONTROL_REPO}/main/control_bridge/command.json"
 
 _state_lock = threading.Lock()
 _control_state = {
@@ -194,75 +195,54 @@ def _set_state(**kwargs):
 
 
 def _command_poller():
-    try:
-        comments = _github_comments()
-        baseline = max((int(c.get("id", 0)) for c in comments), default=0)
-    except Exception as exc:
-        baseline = 0
-        _set_state(
-            queuePollWarning=f"Queue initialization failed: {type(exc).__name__}",
-            queuePollWarningAt=_now_iso(),
-        )
-    _set_state(ready=True, lastCommentId=baseline)
+    """Poll a public, secret-free command file in the GitHub repo.
 
-    seen = baseline
+    The command file contains only safe control instructions; secrets remain in Railway.
+    A command id is executed at most once per bridge process.
+    """
+    last_id = None
+    _set_state(ready=True, lastMessage="Bridge ready; polling command file.")
     while True:
         try:
-            comments = _github_comments()
-            candidates = []
-            now = datetime.now(timezone.utc)
-            for c in comments:
-                cid = int(c.get("id", 0))
-                if cid <= seen:
-                    continue
-                user = (c.get("user") or {}).get("login")
-                body = str(c.get("body") or "")
-                if user != CONTROL_OWNER or not body.startswith(CONTROL_PREFIX):
-                    seen = max(seen, cid)
-                    continue
-                created = datetime.fromisoformat(str(c.get("created_at")).replace("Z", "+00:00"))
-                if (now - created).total_seconds() > COMMAND_MAX_AGE_SECONDS:
-                    seen = max(seen, cid)
-                    continue
-                candidates.append((cid, body[len(CONTROL_PREFIX):].strip()))
-
-            for cid, raw_command in sorted(candidates):
-                seen = max(seen, cid)
+            url = CONTROL_COMMAND_URL + "?ts=" + str(int(time.time()))
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "CatalogFix-Control/1.2",
+                "Cache-Control": "no-cache",
+            })
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                command = json.loads(resp.read().decode("utf-8") or "{}")
+            command_id = str(command.get("id") or "").strip()
+            if command_id and command_id != last_id:
+                last_id = command_id
                 try:
-                    command = json.loads(raw_command)
                     action, result = _execute_queue_command(command)
                     _set_state(
-                        lastCommentId=cid,
+                        lastCommentId=command_id,
                         lastCommand=action,
                         lastStatus="OK",
                         lastMessage="Command completed",
+                        queuePollWarning=None,
+                        queuePollWarningAt=None,
                         result=result,
                     )
                 except Exception as exc:
                     _set_state(
-                        lastCommentId=cid,
-                        lastCommand=None,
+                        lastCommentId=command_id,
+                        lastCommand=str(command.get("action") or "") or None,
                         lastStatus="ERROR",
                         lastMessage=f"{type(exc).__name__}: {str(exc)[:500]}",
                         result=None,
                     )
-        except urllib.error.HTTPError as exc:
-            # GitHub unauthenticated API is rate-limited. A transient queue-poll
-            # failure must not overwrite the status/result of the last Apify command.
-            _set_state(
-                queuePollWarning=f"GitHub queue poll HTTP {exc.code}",
-                queuePollWarningAt=_now_iso(),
-            )
         except Exception as exc:
             _set_state(
-                queuePollWarning=f"Queue poll failed: {type(exc).__name__}",
+                queuePollWarning=f"Command-file poll failed: {type(exc).__name__}",
                 queuePollWarningAt=_now_iso(),
             )
         time.sleep(CONTROL_POLL_SECONDS)
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CatalogFixControl/1.1"
+    server_version = "CatalogFixControl/1.2"
 
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
