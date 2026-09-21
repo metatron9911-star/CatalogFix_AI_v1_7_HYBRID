@@ -1,0 +1,27 @@
+{
+  "catalog-small": {
+    "eventTitle": "Catalog processed — up to 50 pages",
+    "eventDescription": "One completed supplier catalog or spreadsheet, including OCR/parsing, QA gates, structured outputs, and audit files.",
+    "eventPriceUsd": 4.9,
+    "isPrimaryEvent": true,
+    "isOneTimeEvent": true
+  },
+  "catalog-medium": {
+    "eventTitle": "Catalog processed — 51 to 200 pages",
+    "eventDescription": "One completed supplier PDF with 51–200 pages, including OCR/parsing, QA gates, structured outputs, and audit files.",
+    "eventPriceUsd": 12.9,
+    "isOneTimeEvent": true
+  },
+  "catalog-large": {
+    "eventTitle": "Catalog processed — 201 to 500 pages",
+    "eventDescription": "One completed supplier PDF with 201–500 pages, including OCR/parsing, QA gates, structured outputs, and audit files.",
+    "eventPriceUsd": 24.9,
+    "isOneTimeEvent": true
+  },
+  "catalog-screening": {
+    "eventTitle": "Non-catalog screening",
+    "eventDescription": "A file classified as a technical/statistical non-catalog document and intentionally returned without fabricated product rows.",
+    "eventPriceUsd": 1,
+    "isOneTimeEvent": true
+  }
+}
