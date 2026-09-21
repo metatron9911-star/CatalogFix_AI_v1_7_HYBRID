@@ -1,4 +1,7 @@
 {
-  "id": "status-20260921-2022",
-  "action": "status"
+  "id": "build-20260921-2025",
+  "action": "build",
+  "version": "0.0",
+  "tag": "latest",
+  "useCache": true
 }
