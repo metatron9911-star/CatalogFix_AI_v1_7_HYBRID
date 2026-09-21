@@ -1,5 +1,7 @@
 {
-  "id": "store-smoke-log-20260921-2214",
-  "action": "run-log-tail",
-  "runId": "kUkiN8yeTCYoK22Xk"
+  "id": "build-schema-fix-20260921-2216",
+  "action": "build",
+  "version": "0.0",
+  "tag": "latest",
+  "useCache": true
 }
