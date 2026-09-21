@@ -226,12 +226,23 @@ def _startup_command():
             queuePollWarningAt=None,
             result=result,
         )
+        print("CONTROL_RESULT " + json.dumps({
+            "id": command_id,
+            "action": action,
+            "status": "OK",
+            "result": result,
+        }, ensure_ascii=False, default=str), flush=True)
     except Exception as exc:
         _set_state(
             lastStatus="ERROR",
             lastMessage=f"{type(exc).__name__}: {str(exc)[:500]}",
             result=None,
         )
+        print("CONTROL_RESULT " + json.dumps({
+            "status": "ERROR",
+            "errorType": type(exc).__name__,
+            "message": str(exc)[:500],
+        }, ensure_ascii=False), flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
