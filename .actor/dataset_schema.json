@@ -1,0 +1,163 @@
+{
+  "actorSpecification": 1,
+  "fields": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "sku": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Supplier SKU or internal review candidate identifier."
+      },
+      "title": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Normalized product title."
+      },
+      "brand": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "category": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "price": {
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "currency": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "qa_status": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "READY or NEEDS REVIEW based on current release gates."
+      },
+      "quality_confidence": {
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "quality_flags": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "import_method": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_page": {
+        "type": [
+          "number",
+          "string",
+          "null"
+        ]
+      },
+      "source_sheet": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_row": {
+        "type": [
+          "number",
+          "string",
+          "null"
+        ]
+      },
+      "supplier_code": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "visual_confidence": {
+        "type": [
+          "number",
+          "null"
+        ]
+      }
+    }
+  },
+  "views": {
+    "overview": {
+      "title": "Product QA Overview",
+      "description": "Normalized products with Ready/Review status and source quality context.",
+      "transformation": {
+        "fields": [
+          "sku",
+          "title",
+          "brand",
+          "category",
+          "price",
+          "currency",
+          "qa_status",
+          "quality_confidence",
+          "quality_flags",
+          "import_method",
+          "source_page"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "sku": {
+            "label": "SKU"
+          },
+          "title": {
+            "label": "Product title"
+          },
+          "brand": {
+            "label": "Brand"
+          },
+          "category": {
+            "label": "Category"
+          },
+          "price": {
+            "label": "Price"
+          },
+          "currency": {
+            "label": "Currency"
+          },
+          "qa_status": {
+            "label": "QA status"
+          },
+          "quality_confidence": {
+            "label": "Quality confidence"
+          },
+          "quality_flags": {
+            "label": "Quality flags"
+          },
+          "import_method": {
+            "label": "Import method"
+          },
+          "source_page": {
+            "label": "Source page"
+          }
+        }
+      }
+    }
+  }
+}
