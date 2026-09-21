@@ -52,6 +52,7 @@
       "quality_confidence": {
         "type": [
           "number",
+          "string",
           "null"
         ]
       },
@@ -96,6 +97,7 @@
       "visual_confidence": {
         "type": [
           "number",
+          "string",
           "null"
         ]
       }
