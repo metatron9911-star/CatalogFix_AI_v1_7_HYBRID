@@ -1,11 +1,5 @@
 {
-  "id": "run-appliances-20260921-2034",
-  "action": "run",
-  "build": "latest",
-  "memory": 4096,
-  "timeout": 1800,
-  "input": {
-    "catalogFile": "https://carysil.com/wp-content/uploads/2025/06/AppliancesPriceList-New.pdf",
-    "filenameOverride": "AppliancesPriceList-New.pdf"
-  }
+  "id": "run-status-20260921-2035",
+  "action": "run-status",
+  "runId": "lzIVqx5qEHBzxIqfd"
 }
