@@ -1,7 +1,5 @@
 {
-  "id": "build-store-ready-20260921-2145",
-  "action": "build",
-  "version": "0.0",
-  "tag": "latest",
-  "useCache": true
+  "id": "build-status-store-20260921-2148",
+  "action": "build-status",
+  "buildId": "A6fFmuweKsLrcau0e"
 }
