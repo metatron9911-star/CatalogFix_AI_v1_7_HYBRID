@@ -1,18 +1,19 @@
 {
-  "id": "run-records-20260921-2134",
-  "action": "run-records",
-  "runId": "lzIVqx5qEHBzxIqfd",
-  "skus": [
-    "DW-01",
-    "DW-02",
-    "DW-03",
-    "DW-04",
-    "MWO-1",
-    "MWO-2",
-    "FSCR01",
-    "BIO-01",
-    "CW-165",
-    "CW-46"
+  "id": "actor-update-store-20260921-2138",
+  "action": "actor-update",
+  "title": "CatalogFix AI — Supplier Catalog Parser",
+  "description": "Convert supplier PDF, Excel, and CSV catalogs into structured product data with Ready/Review quality gates, OCR, and an audit trail. Missing supplier SKUs are flagged, not invented.",
+  "seoTitle": "Supplier Catalog Parser with OCR & QA",
+  "seoDescription": "Convert supplier PDF, Excel and CSV catalogs into structured product data with OCR, Ready/Review quality gates, and an audit trail.",
+  "categories": [
+    "ECOMMERCE",
+    "AI"
   ],
-  "limit": 300
+  "actorPermissionLevel": "LIMITED_PERMISSIONS",
+  "defaultRunOptions": {
+    "build": "latest",
+    "timeoutSecs": 3600,
+    "memoryMbytes": 4096,
+    "restartOnError": false
+  }
 }
