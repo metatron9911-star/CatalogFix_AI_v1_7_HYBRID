@@ -53,7 +53,7 @@ async def _charge_if_ppe(event_name: str) -> None:
     except Exception as exc:
         Actor.log.warning("PPE charge skipped/failed safely: %s", exc)
 
-def _download_input(source: str, filename_hint: str = "") -> tuple[bytes, str]:
+async def _download_input(source: str, filename_hint: str = "") -> tuple[bytes, str]:
     source = str(source or "").strip()
     if not source:
         raise ValueError("catalogFile is required.")
@@ -64,10 +64,22 @@ def _download_input(source: str, filename_hint: str = "") -> tuple[bytes, str]:
             "Use the Apify file-upload field or paste a direct file URL."
         )
 
-    req = urllib.request.Request(source, headers={"User-Agent": "CatalogFix-AI/1.9"})
-    with urllib.request.urlopen(req, timeout=120) as response:
-        data = response.read()
-        content_type = response.headers.get_content_type() or ""
+    content_type = ""
+    parsed_source = urllib.parse.urlparse(source)
+    m = re.fullmatch(r"/v2/key-value-stores/([^/]+)/records/(.+)", parsed_source.path)
+    if parsed_source.netloc.lower() == "api.apify.com" and m:
+        store_id = urllib.parse.unquote(m.group(1))
+        record_key = urllib.parse.unquote(m.group(2))
+        record = await Actor.apify_client.key_value_store(store_id).get_record_as_bytes(record_key)
+        if not record:
+            raise ValueError("Uploaded Apify file record could not be read.")
+        data = record.get("value", b"")
+        content_type = record.get("content_type") or ""
+    else:
+        req = urllib.request.Request(source, headers={"User-Agent": "CatalogFix-AI/1.9"})
+        with urllib.request.urlopen(req, timeout=120) as response:
+            data = response.read()
+            content_type = response.headers.get_content_type() or ""
 
     if not data:
         raise ValueError("The supplied catalog file is empty.")
@@ -169,7 +181,7 @@ async def main() -> None:
         filename_hint = actor_input.get("filenameOverride", "")
 
         Actor.log.info("CatalogFix AI v%s starting", RELEASE_VERSION)
-        data, filename = _download_input(source, filename_hint)
+        data, filename = await _download_input(source, filename_hint)
         billing_event, page_count = _catalog_size_tier(data, filename)
         Actor.log.info("Input file: %s (%d bytes)", filename, len(data))
         if page_count is not None:
