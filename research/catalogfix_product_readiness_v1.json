@@ -1,0 +1,83 @@
+{
+  "artifact": "research/catalogfix_product_readiness_v1.json",
+  "artifact_version": "1.0",
+  "product": "CatalogFix",
+  "repo": "metatron9911-star/catalogfix-ai",
+  "audit_date": "2026-09-24",
+  "audit_method": "static repo inspection + Store packaging review",
+  "gates": {
+    "B1_input_formats": {
+      "status": "pass",
+      "evidence": "CSV, XLS, XLSX, PDF; PDF text/structured/visual OCR routing"
+    },
+    "B2_deterministic_cleanup": {
+      "status": "pending_proof",
+      "evidence": "rule-based cleanup; no random/uuid/datetime.now in core path; checkpoint versioning present",
+      "blocker": true,
+      "proof_required": "repeat-run regression on a real catalog using tools/determinism_check.py"
+    },
+    "B3_cell_level_diff": {
+      "status": "partial",
+      "evidence": "Issues Found + current_value + source row/page + quality flags; no universal before/after/reason diff",
+      "blocker": false,
+      "notes": "post-pilot upgrade"
+    },
+    "B4_error_handling": {
+      "status": "pass_partial",
+      "evidence": "explicit import errors; non-catalog PDFs fail-safe to 0 rows; Actor emits explicit terminal status",
+      "blocker": false
+    },
+    "B5_client_facing_output": {
+      "status": "pass",
+      "evidence": "RESULT.xlsx, SHOPIFY_READY.csv, SUMMARY.json, IMPORT_REPORT.json, Dataset"
+    },
+    "B6_fixed_scope": {
+      "status": "pass",
+      "evidence": ".actor/README.md documents product scope, uncertainty handling, supported formats and outputs"
+    },
+    "B7_limits": {
+      "status": "partial",
+      "evidence": "PDF <=500 pages hard cut; one file per run; pricing tiers defined",
+      "notes": "row/column/MB limits not explicitly documented"
+    },
+    "B8_pricing": {
+      "status": "pass",
+      "evidence": "$4.90 <=50 pages; $12.90 51-200; $24.90 201-500; $1 screening"
+    },
+    "B9_reference_cases": {
+      "status": "partial",
+      "evidence": "README documents image-only Appliances and TL972; structured order-form covered by smoke test",
+      "blocker": true,
+      "proof_required": "third real reference case with archived client outputs"
+    },
+    "B10_paid_pilot": {
+      "status": "not_started",
+      "blocker": true
+    }
+  },
+  "blockers": [
+    "B2",
+    "B9",
+    "B10"
+  ],
+  "post_pilot_upgrades": [
+    "B3",
+    "B7"
+  ],
+  "next_actions": [
+    {
+      "action": "run determinism regression on one real catalog",
+      "gate": "B2",
+      "artifact": "research/catalogfix_determinism_result_v1.json"
+    },
+    {
+      "action": "archive third real reference case outputs",
+      "gate": "B9",
+      "artifact": "reference_cases/<name>/"
+    },
+    {
+      "action": "run first paid pilot",
+      "gate": "B10"
+    }
+  ]
+}
